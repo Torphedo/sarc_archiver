@@ -1,0 +1,9 @@
+# Build output
+out/
+
+# IDE stuff
+.cache/
+.idea/
+compile_commands.json
+cmake_*/
+
