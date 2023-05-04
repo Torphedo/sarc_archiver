@@ -298,7 +298,6 @@ void* SARC_init_archive(PHYSFS_Io* io) {
 }
 
 bool SARC_loadEntries(PHYSFS_Io* io, uint32_t count, uint32_t files_offset, SARCinfo* archive) {
-    uint32_t file_pos = files_offset;
     uint32_t name_pos = sizeof(sarc_header) + sizeof(sarc_sfat_header);
     name_pos += (sizeof(sarc_sfat_node) * count) + sizeof(sarc_sfnt_header);
     uint32_t name_buf_size = files_offset - name_pos;
@@ -326,9 +325,11 @@ bool SARC_loadEntries(PHYSFS_Io* io, uint32_t count, uint32_t files_offset, SARC
         while((name_pos % 4) != 0) {
             name_pos++;
         }
+
+        uint32_t file_pos = node.file_start_offset + files_offset;
+
         char* name = name_buffer + name_pos;
         SARC_addEntry(archive, name, 0, -1, -1, file_pos, size);
-        // printf("%s\n", name);
         name_pos += strlen(name) + 1;
     }
     allocator.Free(name_buffer);
