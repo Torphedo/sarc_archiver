@@ -25,7 +25,7 @@ typedef struct {
 PHYSFS_sint64 SARC_read(PHYSFS_Io *io, void *buffer, PHYSFS_uint64 len) {
     SARCfileinfo *finfo = (SARCfileinfo *) io->opaque;
     const SARCentry *entry = finfo->entry;
-    const PHYSFS_uint64 bytesLeft = (PHYSFS_uint64)(entry->size-finfo->curPos);
+    const PHYSFS_uint64 bytesLeft = (PHYSFS_uint64)(entry->size - finfo->curPos);
     PHYSFS_sint64 rc;
 
     if (bytesLeft < len)
