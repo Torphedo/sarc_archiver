@@ -190,6 +190,9 @@ PHYSFS_Io* SARC_openWrite(void *opaque, const char *name) {
     __PHYSFS_DirTree* tree = (__PHYSFS_DirTree *) &info->tree;
 
     __PHYSFS_DirTreeEnumerate(tree, "", callback, "", opaque);
+
+    // TODO: Return SARC_Io.
+    // TODO: See if we need to rewrite PHSYFS_flush() to make it call SARC_flush().
     return NULL;
 } /* SARC_openWrite */
 
