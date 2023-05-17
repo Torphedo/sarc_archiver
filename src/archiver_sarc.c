@@ -77,6 +77,7 @@ typedef struct {
     PHYSFS_uint32 curPos;
 }SARCfileinfo;
 
+// TODO: Call SARC_flush() here.
 void SARC_closeArchive(void *opaque) {
     SARCinfo *info = ((SARCinfo *) opaque);
     if (info)
@@ -392,6 +393,10 @@ PHYSFS_Io *SARC_duplicate(PHYSFS_Io *_io) {
     return NULL;
 } /* SARC_duplicate */
 
+// TODO: Rebuild the SARC archive here, then write it to disk.
+// We may also want to track the number of open write handles, and free all of
+// our files' heap allocations if there are no open write handles left. This
+// should help keep memory usage under control.
 int SARC_flush(PHYSFS_Io *io) { return 1;  /* no write support. */ }
 
 void SARC_destroy(PHYSFS_Io *io) {

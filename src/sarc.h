@@ -9,7 +9,7 @@ typedef struct {
     uint16_t header_size; // 0x14
     uint16_t byte_order_mark;
     uint32_t archive_size;
-    uint32_t data_offset; // Position where the file data start.
+    uint32_t data_offset; // Position where the file data starts.
     uint16_t version;
     uint16_t reserved;
 }sarc_header;
