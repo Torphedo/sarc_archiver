@@ -22,7 +22,10 @@
 
 #include "sarc.h"
 #include "archiver_sarc.h"
-#include "custom_stream_standard.h"
+
+static const char* module_name_info = "[\033[32mVFS::SARC\033[0m]";
+static const char* module_name_warn = "[\033[33mVFS::SARC\033[0m]";
+static const char* module_name_err = "[\033[31mVFS::SARC\033[0m]";
 
 const PHYSFS_Archiver archiver_sarc_default = {
         .version = 0,
@@ -43,6 +46,18 @@ const PHYSFS_Archiver archiver_sarc_default = {
         .stat = SARC_stat,
         .closeArchive = SARC_closeArchive
 };
+static const PHYSFS_Io SARC_Io = {
+        .version = 0,
+        .opaque = NULL,
+        .read = SARC_read,
+        .write = SARC_write,
+        .seek = SARC_seek,
+        .tell = SARC_tell,
+        .length = SARC_length,
+        .duplicate = SARC_duplicate,
+        .flush = SARC_flush,
+        .destroy = SARC_destroy
+};
 
 typedef struct {
     __PHYSFS_DirTree tree;
@@ -52,9 +67,8 @@ typedef struct {
 typedef struct {
     __PHYSFS_DirTreeEntry tree;
     PHYSFS_uint64 startPos;
+    uintptr_t data_ptr; // Files open for write will store a pointer here instead of an offset.
     PHYSFS_uint64 size;
-    PHYSFS_sint64 ctime;
-    PHYSFS_sint64 mtime;
 }SARCentry;
 
 typedef struct {
@@ -132,8 +146,50 @@ SARC_openRead_failed:
     return NULL;
 } /* SARC_openRead */
 
-PHYSFS_Io *SARC_openWrite(void *opaque, const char *name) {
-    BAIL(PHYSFS_ERR_READ_ONLY, NULL);
+// Copy all file contents to newly allocated buffers
+PHYSFS_EnumerateCallbackResult callback(void *data, const char *origdir, const char *fname) {
+    SARCinfo* info = (SARCinfo*)data;
+    char* full_path = __PHYSFS_smallAlloc(strlen(origdir) + strlen(fname) + 1);
+    // It doesn't want a leading slash, but we need a slash between directories.
+    if (origdir[0] == 0) {
+        // No containing dir.
+        strcpy(full_path, fname);
+    }
+    else {
+        sprintf(full_path, "%s/%s", origdir, fname);
+    }
+
+    PHYSFS_Stat statbuf = {0};
+    PHYSFS_stat(full_path, &statbuf);
+    if  (statbuf.filetype == PHYSFS_FILETYPE_DIRECTORY){
+        __PHYSFS_DirTreeEnumerate(&info->tree, full_path, callback, full_path, data);
+    }
+    else {
+        // We've finally got a full filename.
+        SARCentry* entry = findEntry(info, full_path);
+
+        // Store the file in a new buffer and store the pointer in the entry.
+        entry->data_ptr = (uint64_t) allocator.Malloc(entry->size);
+        uint64_t pos = info->io->tell(info->io); // Save position
+        info->io->seek(info->io, entry->startPos);
+        info->io->read(info->io, (void*)entry->data_ptr, entry->size);
+        info->io->seek(info->io, pos); // Go back to saved position
+        printf("%s %s\n", module_name_info, full_path);
+    }
+
+
+    __PHYSFS_smallFree(full_path);
+    return PHYSFS_ENUM_OK;
+}
+
+PHYSFS_Io* SARC_openWrite(void *opaque, const char *name) {
+    // Work in progress.
+    SARCinfo* info = (SARCinfo*) opaque;
+    printf("%s SARC_openWrite() called.\n", module_name_info);
+    __PHYSFS_DirTree* tree = (__PHYSFS_DirTree *) &info->tree;
+
+    __PHYSFS_DirTreeEnumerate(tree, "", callback, "", opaque);
+    return NULL;
 } /* SARC_openWrite */
 
 PHYSFS_Io *SARC_openAppend(void *opaque, const char *name) {
@@ -163,8 +219,8 @@ int SARC_stat(void *opaque, const char *path, PHYSFS_Stat *stat) {
         stat->filesize = entry->size;
     } /* else */
 
-    stat->modtime = entry->mtime;
-    stat->createtime = entry->ctime;
+    stat->modtime = 0;
+    stat->createtime = 0;
     stat->accesstime = -1;
     stat->readonly = 1;
 
@@ -182,8 +238,6 @@ void* SARC_addEntry(void* opaque, char* name, const int isdir,
 
     entry->startPos = isdir ? 0 : pos;
     entry->size = isdir ? 0 : len;
-    entry->ctime = ctime;
-    entry->mtime = mtime;
 
     return entry;
 } /* SARC_addEntry */
@@ -268,3 +322,81 @@ void* SARC_openArchive(PHYSFS_Io* io, const char* name, int forWriting, int* cla
 
     return archive;
 }
+
+
+// PHYSFS_Io implementation for SARC
+
+PHYSFS_sint64 SARC_read(PHYSFS_Io *io, void *buffer, PHYSFS_uint64 len) {
+    SARCfileinfo *finfo = (SARCfileinfo *) io->opaque;
+    const SARCentry *entry = finfo->entry;
+    const PHYSFS_uint64 bytesLeft = (PHYSFS_uint64)(entry->size - finfo->curPos);
+    PHYSFS_sint64 rc;
+
+    if (bytesLeft < len)
+        len = bytesLeft;
+
+    rc = finfo->io->read(finfo->io, buffer, len);
+    if (rc > 0)
+        finfo->curPos += (PHYSFS_uint32) rc;
+
+    return rc;
+} /* SARC_read */
+
+PHYSFS_sint64 SARC_write(PHYSFS_Io *io, const void *b, PHYSFS_uint64 len) {
+    BAIL(PHYSFS_ERR_READ_ONLY, -1);
+} /* SARC_write */
+
+PHYSFS_sint64 SARC_tell(PHYSFS_Io *io) {
+    return ((SARCfileinfo *) io->opaque)->curPos;
+} /* SARC_tell */
+
+int SARC_seek(PHYSFS_Io *io, PHYSFS_uint64 offset) {
+    SARCfileinfo *finfo = (SARCfileinfo *) io->opaque;
+    const SARCentry *entry = finfo->entry;
+    int rc;
+
+    BAIL_IF(offset >= entry->size, PHYSFS_ERR_PAST_EOF, 0);
+    rc = finfo->io->seek(finfo->io, entry->startPos + offset);
+    if (rc)
+        finfo->curPos = (PHYSFS_uint32) offset;
+
+    return rc;
+} /* SARC_seek */
+
+PHYSFS_sint64 SARC_length(PHYSFS_Io *io) {
+    const SARCfileinfo *finfo = (SARCfileinfo *) io->opaque;
+    return ((PHYSFS_sint64) finfo->entry->size);
+} /* SARC_length */
+
+PHYSFS_Io *SARC_duplicate(PHYSFS_Io *_io) {
+    SARCfileinfo *origfinfo = (SARCfileinfo *) _io->opaque;
+    PHYSFS_Io *io = NULL;
+    PHYSFS_Io *retval = (PHYSFS_Io *) allocator.Malloc(sizeof (PHYSFS_Io));
+    SARCfileinfo *finfo = (SARCfileinfo *) allocator.Malloc(sizeof (SARCfileinfo));
+    GOTO_IF(!retval, PHYSFS_ERR_OUT_OF_MEMORY, SARC_duplicate_failed);
+    GOTO_IF(!finfo, PHYSFS_ERR_OUT_OF_MEMORY, SARC_duplicate_failed);
+
+    io = origfinfo->io->duplicate(origfinfo->io);
+    if (!io) goto SARC_duplicate_failed;
+    finfo->io = io;
+    finfo->entry = origfinfo->entry;
+    finfo->curPos = 0;
+    memcpy(retval, _io, sizeof (PHYSFS_Io));
+    retval->opaque = finfo;
+    return retval;
+
+    SARC_duplicate_failed:
+    if (finfo != NULL) allocator.Free(finfo);
+    if (retval != NULL) allocator.Free(retval);
+    if (io != NULL) io->destroy(io);
+    return NULL;
+} /* SARC_duplicate */
+
+int SARC_flush(PHYSFS_Io *io) { return 1;  /* no write support. */ }
+
+void SARC_destroy(PHYSFS_Io *io) {
+    SARCfileinfo *finfo = (SARCfileinfo *) io->opaque;
+    finfo->io->destroy(finfo->io);
+    allocator.Free(finfo);
+    allocator.Free(io);
+} /* SARC_destroy */

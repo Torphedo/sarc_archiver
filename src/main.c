@@ -29,7 +29,7 @@ int main(int argc, char** argv) {
     printf("Mounting %s...\n\n", packname);
     PHYSFS_mount(packname, NULL, true);
 
-    rc = PHYSFS_enumerateFiles("/Component/ArmorParam");
+    rc = PHYSFS_enumerateFiles("/");
     for (char** i = rc; *i != NULL; i++) {
         printf(" * We've got [%s].\n", *i);
     }
@@ -45,4 +45,6 @@ int main(int argc, char** argv) {
     fwrite(buffer, size, 1, output);
     fclose(output);
     free(buffer);
+
+    PHYSFS_file* test_write = PHYSFS_openWrite("/Component/ArmorParam/Armor_012_Upper.game__component__ArmorParam.bgyml");
 }
