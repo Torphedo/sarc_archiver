@@ -46,7 +46,7 @@ int virtual_free(void* addr, uint64_t size) {
 }
 #endif
 
-/* For Switch, use the following to reserve virtual memory:
- * https://github.com/switchbrew/libnx/blob/master/nx/include/switch/kernel/virtmem.h
- */
+// Reserving / committing doesn't really exist as a kernel concept on HorizonOS
+// (Switch). We'll probably have to fake this behaviour by doing re-allocation
+// and copying behind the scenes to get it to work.
 
