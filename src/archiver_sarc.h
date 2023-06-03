@@ -1,6 +1,8 @@
 #pragma once
 #include <stdbool.h>
 
+#include <physfs.h>
+
 void SARC_closeArchive(void *opaque);
 
 void SARC_abandonArchive(void *opaque);

@@ -22,13 +22,13 @@
 #include <sys/mman.h>
 
 void* virtual_reserve(uint64_t size) {
-    return mmap(NULL, size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  return mmap(NULL, size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 }
 int virtual_commit(void* addr, uint64_t size) {
-    return mprotect(addr, size, PROT_READ | PROT_WRITE);
+  return mprotect(addr, size, PROT_READ | PROT_WRITE);
 }
 int virtual_free(void* addr, uint64_t size) {
-    return munmap(addr, size);
+  return munmap(addr, size);
 }
 #endif
 
@@ -36,13 +36,13 @@ int virtual_free(void* addr, uint64_t size) {
 #include <Windows.h>
 
 void* virtual_reserve(uint64_t size) {
-    return VirtualAlloc(NULL, size, MEM_RESERVE, PAGE_READWRITE);
+  return VirtualAlloc(NULL, size, MEM_RESERVE, PAGE_READWRITE);
 }
 int virtual_commit(void* addr, uint64_t size) {
-    return VirtualAlloc(addr, size, MEM_COMMIT, PAGE_READWRITE);
+  return VirtualAlloc(addr, size, MEM_COMMIT, PAGE_READWRITE);
 }
 int virtual_free(void* addr, uint64_t size) {
-    return VirtualFree(addr, 0, MEM_RELEASE);
+  return VirtualFree(addr, 0, MEM_RELEASE);
 }
 #endif
 

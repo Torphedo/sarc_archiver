@@ -4,64 +4,64 @@
 #include <stdint.h>
 
 typedef enum {
-    // Header
-    SARC_MAGIC = (uint32_t) 'SARC',
-    SARC_HEADER_SIZE = 0x14,
-    SARC_LITTLE_ENDIAN = 0xFFFE,
-    SARC_BIG_ENDIAN = 0xFEFF,
-    SARC_VERSION = 0x0100,
+  // Header
+  SARC_MAGIC = (uint32_t) 'SARC',
+  SARC_HEADER_SIZE = 0x14,
+  SARC_LITTLE_ENDIAN = 0xFFFE,
+  SARC_BIG_ENDIAN = 0xFEFF,
+  SARC_VERSION = 0x0100,
 
-    // SFAT 
-    SFAT_MAGIC = (uint32_t) 'SFAT',
-    SFAT_HEADER_SIZE = 0xC,
-    SFAT_HASH_KEY = (uint32_t) 0x00000065
+  // SFAT 
+  SFAT_MAGIC = (uint32_t) 'SFAT',
+  SFAT_HEADER_SIZE = 0xC,
+  SFAT_HASH_KEY = (uint32_t) 0x00000065
 }sarc_constants;
 
 // Archive header
 typedef struct {
-    uint32_t magic; // 'SARC'
-    uint16_t header_size; // 0x14
-    uint16_t byte_order_mark;
-    uint32_t archive_size;
-    uint32_t data_offset; // Position where the file data starts.
-    uint16_t version;
-    uint16_t reserved;
+  uint32_t magic; // 'SARC'
+  uint16_t header_size; // 0x14
+  uint16_t byte_order_mark;
+  uint32_t archive_size;
+  uint32_t data_offset; // Position where the file data starts.
+  uint16_t version;
+  uint16_t reserved;
 }sarc_header;
 
 
 // SARC File Allocation Table (SFAT) structures
 
 typedef struct {
-    uint32_t magic; // 'SFAT'
-    uint16_t header_size; // 0xC
-    uint16_t node_count;
-    uint32_t hash_key; // 0x65
+  uint32_t magic; // 'SFAT'
+  uint16_t header_size; // 0xC
+  uint16_t node_count;
+  uint32_t hash_key; // 0x65
 }sarc_sfat_header;
 
 // Offsets in this structure are relative to header.data_offset
 typedef struct {
-    uint32_t filename_hash;
-    uint32_t file_attributes;
-    uint32_t file_start_offset;
-    uint32_t file_end_offset;
+  uint32_t filename_hash;
+  uint32_t file_attributes;
+  uint32_t file_start_offset;
+  uint32_t file_end_offset;
 }sarc_sfat_node;
 
 
 // SARC File Name Table (SFNT) structures
 
 typedef struct {
-    uint32_t magic; // 'SFNT'
-    uint16_t header_size; // 0x8
-    uint16_t reserved;
+  uint32_t magic; // 'SFNT'
+  uint16_t header_size; // 0x8
+  uint16_t reserved;
 }sarc_sfnt_header;
 
 // Hash code taken from here (almost verbatim):
 // https://mk8.tockdom.com/wiki/SARC_(File_Format)#File_Name_Hash
 uint32_t sarc_filename_hash(char* name, uint32_t length, uint32_t key) {
-    uint32_t result = 0;
-    for (uint32_t i = 0; i < length; i++) {
-        result = name[i] + (result * key);
-    }
-    return result;
+  uint32_t result = 0;
+  for (uint32_t i = 0; i < length; i++) {
+    result = name[i] + (result * key);
+  }
+  return result;
 }
 
