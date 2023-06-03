@@ -3,6 +3,20 @@
 
 #include <stdint.h>
 
+typedef enum {
+    // Header
+    SARC_MAGIC = (uint32_t) 'SARC',
+    SARC_HEADER_SIZE = 0x14,
+    SARC_LITTLE_ENDIAN = 0xFFFE,
+    SARC_BIG_ENDIAN = 0xFEFF,
+    SARC_VERSION = 0x0100,
+
+    // SFAT 
+    SFAT_MAGIC = (uint32_t) 'SFAT',
+    SFAT_HEADER_SIZE = 0xC,
+    SFAT_HASH_KEY = (uint32_t) 0x00000065
+}sarc_constants;
+
 // Archive header
 typedef struct {
     uint32_t magic; // 'SARC'
@@ -41,4 +55,13 @@ typedef struct {
     uint16_t reserved;
 }sarc_sfnt_header;
 
+// Hash code taken from here (almost verbatim):
+// https://mk8.tockdom.com/wiki/SARC_(File_Format)#File_Name_Hash
+uint32_t sarc_filename_hash(char* name, uint32_t length, uint32_t key) {
+    uint32_t result = 0;
+    for (uint32_t i = 0; i < length; i++) {
+        result = name[i] + (result * key);
+    }
+    return result;
+}
 
