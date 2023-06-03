@@ -47,4 +47,5 @@ int main(int argc, char** argv) {
     free(buffer);
 
     PHYSFS_file* test_write = PHYSFS_openWrite("/Component/ArmorParam/Armor_012_Upper.game__component__ArmorParam.bgyml");
+    PHYSFS_close(test_write);
 }

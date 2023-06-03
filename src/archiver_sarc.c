@@ -13,6 +13,7 @@
  *  This file originally written by Ryan C. Gordon.
  */
 
+#include <bits/stdint-uintn.h>
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -27,6 +28,10 @@ static const char* module_name_info = "[\033[32mVFS::SARC\033[0m]";
 static const char* module_name_warn = "[\033[33mVFS::SARC\033[0m]";
 static const char* module_name_err = "[\033[31mVFS::SARC\033[0m]";
 
+// TODO: See if we can track the number of open write handles, then rebuild the
+// SARC and turn it back into a normal read-only archive? It looks like calling
+// PHYSFS_close() may call our io->flush() which will let us know when a write
+// handle is closed.
 const PHYSFS_Archiver archiver_sarc_default = {
         .version = 0,
         .info = {
@@ -46,6 +51,7 @@ const PHYSFS_Archiver archiver_sarc_default = {
         .stat = SARC_stat,
         .closeArchive = SARC_closeArchive
 };
+
 static const PHYSFS_Io SARC_Io = {
         .version = 0,
         .opaque = NULL,
@@ -62,20 +68,28 @@ static const PHYSFS_Io SARC_Io = {
 typedef struct {
     __PHYSFS_DirTree tree;
     PHYSFS_Io *io;
+    uint32_t open_write_handles; // The number of write handles currently open to this archive
 }SARCinfo;
 
 typedef struct {
     __PHYSFS_DirTreeEntry tree;
     PHYSFS_uint64 startPos;
-    uintptr_t data_ptr; // Files open for write will store a pointer here instead of an offset.
     PHYSFS_uint64 size;
+    uintptr_t data_ptr; // Files open for write will store a pointer here instead of an offset.
 }SARCentry;
 
 typedef struct {
     PHYSFS_Io *io;
     SARCentry *entry;
+    SARCinfo* arc_info;
     PHYSFS_uint32 curPos;
 }SARCfileinfo;
+
+typedef struct {
+    uint32_t file_count;
+    __PHYSFS_DirTree* tree;
+}callback_data;
+
 
 // TODO: Call SARC_flush() here.
 void SARC_closeArchive(void *opaque) {
@@ -127,6 +141,9 @@ PHYSFS_Io *SARC_openRead(void *opaque, const char *name) {
 
     finfo->curPos = 0;
     finfo->entry = entry;
+    
+    // Give IO our archiver info
+    finfo->arc_info = opaque;
 
     // Set SARC_Io as the I/O handler for this archiver
     memcpy(retval, &SARC_Io, sizeof (*retval));
@@ -148,9 +165,13 @@ SARC_openRead_failed:
 } /* SARC_openRead */
 
 // Copy all file contents to newly allocated buffers
-PHYSFS_EnumerateCallbackResult callback(void *data, const char *origdir, const char *fname) {
+PHYSFS_EnumerateCallbackResult callback_copy_files(void *data, const char *origdir, const char *fname) {
     SARCinfo* info = (SARCinfo*)data;
     char* full_path = __PHYSFS_smallAlloc(strlen(origdir) + strlen(fname) + 1);
+    if (full_path == NULL) {
+        return PHYSFS_ENUM_ERROR;
+    }
+
     // It doesn't want a leading slash, but we need a slash between directories.
     if (origdir[0] == 0) {
         // No containing dir.
@@ -163,7 +184,7 @@ PHYSFS_EnumerateCallbackResult callback(void *data, const char *origdir, const c
     PHYSFS_Stat statbuf = {0};
     PHYSFS_stat(full_path, &statbuf);
     if  (statbuf.filetype == PHYSFS_FILETYPE_DIRECTORY){
-        __PHYSFS_DirTreeEnumerate(&info->tree, full_path, callback, full_path, data);
+        __PHYSFS_DirTreeEnumerate(&info->tree, full_path, callback_copy_files, full_path, data);
     }
     else {
         // We've finally got a full filename.
@@ -178,7 +199,6 @@ PHYSFS_EnumerateCallbackResult callback(void *data, const char *origdir, const c
         printf("%s %s\n", module_name_info, full_path);
     }
 
-
     __PHYSFS_smallFree(full_path);
     return PHYSFS_ENUM_OK;
 }
@@ -186,19 +206,109 @@ PHYSFS_EnumerateCallbackResult callback(void *data, const char *origdir, const c
 PHYSFS_Io* SARC_openWrite(void *opaque, const char *name) {
     // Work in progress.
     SARCinfo* info = (SARCinfo*) opaque;
-    printf("%s SARC_openWrite() called.\n", module_name_info);
     __PHYSFS_DirTree* tree = (__PHYSFS_DirTree *) &info->tree;
 
-    __PHYSFS_DirTreeEnumerate(tree, "", callback, "", opaque);
+    __PHYSFS_DirTreeEnumerate(tree, "", callback_copy_files, "", opaque);
 
-    // TODO: Return SARC_Io.
-    // TODO: See if we need to rewrite PHSYFS_flush() to make it call SARC_flush().
-    return NULL;
+    info->open_write_handles++;
+
+    SARCfileinfo* file_info = allocator.Malloc(sizeof(SARCfileinfo));
+    if (file_info == NULL) {
+        printf("SARC_openWrite(): Failed to allocate %d bytes for SARCfileinfo.\n", sizeof(SARCfileinfo));
+        return NULL;
+    }
+    else {
+        file_info->curPos = 0;
+        file_info->entry = findEntry(info, name);
+        file_info->io = info->io->duplicate(info->io);
+        file_info->arc_info = opaque;
+    }
+
+    PHYSFS_Io* handle = allocator.Malloc(sizeof(PHYSFS_Io));
+    if (handle == NULL) {
+        printf("SARC_openWrite(): Failed to allocate %d bytes for PHYSFS_Io return value.\n", sizeof(PHYSFS_Io));
+    }
+    else {
+        memcpy(handle, &SARC_Io, sizeof(*handle));
+        handle->opaque = file_info;
+    }
+    return handle;
 } /* SARC_openWrite */
 
+// TODO: Make append actually append
 PHYSFS_Io *SARC_openAppend(void *opaque, const char *name) {
-    BAIL(PHYSFS_ERR_READ_ONLY, NULL);
+    return SARC_openWrite(opaque, name);
 } /* SARC_openAppend */
+
+PHYSFS_EnumerateCallbackResult callback_file_count(void *data, const char *origdir, const char *fname) {
+    callback_data* callback = (callback_data*)data;
+    char* full_path = __PHYSFS_smallAlloc(strlen(origdir) + strlen(fname) + 1);
+    if (full_path == NULL) {
+        return PHYSFS_ENUM_ERROR;
+    }
+
+    // It doesn't want a leading slash, but we need a slash between directories.
+    if (origdir[0] == 0) {
+        // No containing dir.
+        strcpy(full_path, fname);
+    }
+    else {
+        sprintf(full_path, "%s/%s", origdir, fname);
+    }
+
+    PHYSFS_Stat statbuf = {0};
+    PHYSFS_stat(full_path, &statbuf);
+    if  (statbuf.filetype == PHYSFS_FILETYPE_DIRECTORY) {
+        __PHYSFS_DirTreeEnumerate(callback->tree, full_path, callback_file_count, full_path, data);
+    }
+    else {
+        // We've finally got a real file.
+        callback->file_count++;
+    }
+
+    __PHYSFS_smallFree(full_path);
+    return PHYSFS_ENUM_OK;
+}
+
+void rebuild_sarc(PHYSFS_Io* io) {
+    SARCfileinfo *finfo = (SARCfileinfo *) io->opaque;
+    io->seek(io, 0); // Start of file
+
+    sarc_header header = {
+        .magic = SARC_MAGIC,
+        .header_size = SARC_HEADER_SIZE,
+        .byte_order_mark = SARC_LITTLE_ENDIAN,
+        .archive_size = 0, // We fill these 2 fields in at the end.   
+        .data_offset = 0,
+        .version = SARC_VERSION,
+        .reserved = 0
+    };
+    sarc_sfat_header sfat_header = {
+        .magic = SFAT_MAGIC,
+        .header_size = SFAT_HEADER_SIZE,
+        .node_count = 0, // Number of files in archive
+        .hash_key = SFAT_HASH_KEY
+    };
+    callback_data data = { 0, &finfo->arc_info->tree };
+
+    // Get number of files.
+    __PHYSFS_DirTreeEnumerate(data.tree, "", callback_file_count, "", &data);
+
+    printf("rebuild_sarc(): %d files", data.file_count);
+    sfat_header.node_count = data.file_count;
+
+    io->write(io, &header, sizeof(header));
+    io->write(io, &sfat_header, sizeof(sfat_header));
+}
+
+// Try to rebuild/flush archive to disk if all write handles are closed.
+void close_write_handle(PHYSFS_Io* io) {
+    SARCinfo* info = io->opaque;
+    info->open_write_handles--;
+
+    rebuild_sarc(io);
+}
+
 
 int SARC_remove(void *opaque, const char *name) {
     BAIL(PHYSFS_ERR_READ_ONLY, 0);
@@ -396,11 +506,14 @@ PHYSFS_Io *SARC_duplicate(PHYSFS_Io *_io) {
     return NULL;
 } /* SARC_duplicate */
 
-// TODO: Rebuild the SARC archive here, then write it to disk.
-// We may also want to track the number of open write handles, and free all of
-// our files' heap allocations if there are no open write handles left. This
-// should help keep memory usage under control.
-int SARC_flush(PHYSFS_Io *io) { return 1;  /* no write support. */ }
+// TODO: Make this decrement write handle counter and rebuild SARC then flush to
+// disk. If there are no more open write handles, free the individual file
+// buffers and make it a normal read-only archive again. This function is only
+// called when closing a write handle or shutting down PhysicsFS.
+int SARC_flush(PHYSFS_Io *io) {
+    close_write_handle(io);
+    return 1;
+}
 
 void SARC_destroy(PHYSFS_Io *io) {
     SARCfileinfo *finfo = (SARCfileinfo *) io->opaque;
