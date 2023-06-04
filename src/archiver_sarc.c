@@ -13,7 +13,6 @@
  *  This file originally written by Ryan C. Gordon.
  */
 
-#include <bits/stdint-uintn.h>
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -23,6 +22,7 @@
 
 #include "sarc.h"
 #include "archiver_sarc.h"
+#include "physfs_utils.h"
 
 static const char* module_name_info = "[\033[32mVFS::SARC\033[0m]";
 static const char* module_name_warn = "[\033[33mVFS::SARC\033[0m]";
@@ -86,9 +86,10 @@ typedef struct {
 }SARCfileinfo;
 
 typedef struct {
-  uint32_t file_count;
-  __PHYSFS_DirTree* tree;
-}callback_data;
+  char **list;
+  PHYSFS_uint32 size;
+  PHYSFS_ErrorCode errcode;
+}EnumStringListCallbackData;
 
 
 // TODO: Call SARC_flush() here.
@@ -242,39 +243,8 @@ PHYSFS_Io *SARC_openAppend(void *opaque, const char *name) {
   return SARC_openWrite(opaque, name);
 } /* SARC_openAppend */
 
-PHYSFS_EnumerateCallbackResult callback_file_count(void *data, const char *origdir, const char *fname) {
-  callback_data* callback = (callback_data*)data;
-  char* full_path = __PHYSFS_smallAlloc(strlen(origdir) + strlen(fname) + 1);
-  if (full_path == NULL) {
-    return PHYSFS_ENUM_ERROR;
-  }
-
-  // It doesn't want a leading slash, but we need a slash between directories.
-  if (origdir[0] == 0) {
-    // No containing dir.
-     strcpy(full_path, fname);
-  }
-  else {
-    sprintf(full_path, "%s/%s", origdir, fname);
-  }
-
-  PHYSFS_Stat statbuf = {0};
-  PHYSFS_stat(full_path, &statbuf);
-  if  (statbuf.filetype == PHYSFS_FILETYPE_DIRECTORY) {
-    __PHYSFS_DirTreeEnumerate(callback->tree, full_path, callback_file_count, full_path, data);
-  }
-  else {
-    // We've finally got a real file.
-    callback->file_count++;
-  }
-
-  __PHYSFS_smallFree(full_path);
-  return PHYSFS_ENUM_OK;
-}
-
 void rebuild_sarc(PHYSFS_Io* io) {
   SARCfileinfo *finfo = (SARCfileinfo *) io->opaque;
-  io->seek(io, 0); // Start of file
 
   sarc_header header = {
     .magic = SARC_MAGIC,
@@ -291,16 +261,77 @@ void rebuild_sarc(PHYSFS_Io* io) {
     .node_count = 0, // Number of files in archive
     .hash_key = SFAT_HASH_KEY
   };
-  callback_data data = { 0, &finfo->arc_info->tree };
+  sarc_sfnt_header sfnt_header = {
+    .magic = SFNT_MAGIC,
+    .header_size = SFNT_HEADER_SIZE,
+    .reserved = 0
+  };
 
-  // Get number of files.
-  __PHYSFS_DirTreeEnumerate(data.tree, "", callback_file_count, "", &data);
+  // We'll write these later, skip for now.
+  io->seek(io, sizeof(header) + sizeof(sfat_header));
 
-  printf("rebuild_sarc(): %d files", data.file_count);
-  sfat_header.node_count = data.file_count;
+  __PHYSFS_DirTree* tree = &finfo->arc_info->tree;
+  char** file_list = __PHYSFS_enumerateFilesTree(tree, "");
 
-  io->write(io, &header, sizeof(header));
+  // Get file count first.
+  for (char** i = file_list; *i != NULL; i++) {
+    sfat_header.node_count++;
+  }
+
+  // Skip over SFAT until we know what offsets things should be at
+  io->seek(io, io->tell(io) + (sfat_header.node_count * sizeof(sarc_sfat_node)));
+
+  // Write SFNT
+  io->write(io, &sfnt_header, sizeof(sfnt_header));
+  for (char** i = file_list; *i != NULL; i++) {
+    io->write(io, *i, strlen(*i)); // Write filenames
+
+    // Jump to the next 4-byte alignment boundary.
+    while((io->tell(io) % 4) != 0) {
+      io->seek(io, io->tell(io) + 1); // Jump forward 1 byte
+    }
+  }
+
+  header.data_offset = io->tell(io); // Now we know where files should start.
+  // This tracks where we are while writing files.
+  uint32_t file_write_pos = header.data_offset;
+
+  // Time to write SFAT.
+  io->seek(io, sizeof(header)); // Jump to SFAT header location.
   io->write(io, &sfat_header, sizeof(sfat_header));
+  for (char** i = file_list; *i != NULL; i++) {
+    SARCentry* entry = findEntry(finfo->arc_info, *i);
+
+    sarc_sfat_node node = {
+      .filename_hash = sarc_filename_hash(*i, strlen(*i), sfat_header.hash_key),
+      .file_attributes = 0,
+      .file_start_offset = file_write_pos,
+      .file_end_offset = file_write_pos + entry->size
+    };
+    uint32_t cur_pos = io->tell(io); // Save our spot
+    // Write the file data.
+    io->seek(io, file_write_pos);
+    if ((void*)entry->data_ptr == NULL) {
+      printf("%s rebuild_sarc(): invalid file data pointer!\n", module_name_err);
+      return;
+    }
+    io->write(io, (void*)entry->data_ptr, entry->size);
+    // Update our file write position and align to 4 byte boundary
+    file_write_pos = io->tell(io);
+    while((file_write_pos % 4) != 0) {
+      file_write_pos++;
+    }
+
+    // Jump back to where we were, and write the SFAT node.
+    io->seek(io, cur_pos);
+    io->write(io, &node, sizeof(node));
+  }
+  header.archive_size = file_write_pos;
+  io->seek(io, 0);
+  io->write(io, &header, sizeof(header));
+  
+  PHYSFS_freeList(file_list);
+
 }
 
 // Try to rebuild/flush archive to disk if all write handles are closed.
