@@ -5,16 +5,19 @@
 
 typedef enum {
   // Header
-  SARC_MAGIC = (uint32_t) 'SARC',
+  SARC_MAGIC = 0x53415243, // 'SARC'
   SARC_HEADER_SIZE = 0x14,
   SARC_LITTLE_ENDIAN = 0xFFFE,
   SARC_BIG_ENDIAN = 0xFEFF,
   SARC_VERSION = 0x0100,
 
   // SFAT 
-  SFAT_MAGIC = (uint32_t) 'SFAT',
+  SFAT_MAGIC = 0x53464154, // 'SFAT'
   SFAT_HEADER_SIZE = 0xC,
-  SFAT_HASH_KEY = (uint32_t) 0x00000065
+  SFAT_HASH_KEY = (uint32_t) 0x00000065,
+
+  SFNT_MAGIC = 0x53464E54, // 'SFNT'
+  SFNT_HEADER_SIZE = 0x8
 }sarc_constants;
 
 // Archive header
