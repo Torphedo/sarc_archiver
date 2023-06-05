@@ -5,18 +5,18 @@
 
 typedef enum {
   // Header
-  SARC_MAGIC = 0x53415243, // 'SARC'
+  SARC_MAGIC = 0x43524153, // 'SARC'
   SARC_HEADER_SIZE = 0x14,
-  SARC_LITTLE_ENDIAN = 0xFFFE,
-  SARC_BIG_ENDIAN = 0xFEFF,
+  SARC_LITTLE_ENDIAN = 0xFEFF,
+  SARC_BIG_ENDIAN = 0xFFFE,
   SARC_VERSION = 0x0100,
 
   // SFAT 
-  SFAT_MAGIC = 0x53464154, // 'SFAT'
+  SFAT_MAGIC = 0x54414653, // 'SFAT'
   SFAT_HEADER_SIZE = 0xC,
   SFAT_HASH_KEY = (uint32_t) 0x00000065,
 
-  SFNT_MAGIC = 0x53464E54, // 'SFNT'
+  SFNT_MAGIC = 0x544E4653, // 'SFNT'
   SFNT_HEADER_SIZE = 0x8
 }sarc_constants;
 
@@ -44,7 +44,8 @@ typedef struct {
 // Offsets in this structure are relative to header.data_offset
 typedef struct {
   uint32_t filename_hash;
-  uint32_t file_attributes;
+  uint16_t filename_offset;
+  uint16_t enable_offset; // This is 1 when the above field is valid
   uint32_t file_start_offset;
   uint32_t file_end_offset;
 }sarc_sfat_node;
