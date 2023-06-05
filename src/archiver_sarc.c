@@ -284,12 +284,60 @@ void rebuild_sarc(PHYSFS_Io* io) {
   PHYSFS_seek(arc, sizeof(header) + sizeof(sfat_header));
 
   __PHYSFS_DirTree* tree = &finfo->arc_info->tree;
-  char** file_list = __PHYSFS_enumerateFilesTree(tree, "");
-
+  char** file_list_unsorted = __PHYSFS_enumerateFilesTree(tree, "");
+  
   // Get file count first.
-  for (char** i = file_list; *i != NULL; i++) {
+  for (char** i = file_list_unsorted; *i != NULL; i++) {
     sfat_header.node_count++;
   }
+
+  // The files are ordered by hash, so we need to sort them before writing.
+  uint32_t sorted = 0;
+
+  uint32_t size = sizeof(char*) * (sfat_header.node_count + 1);
+  char** file_list = allocator.Malloc(size);
+  memset(file_list, 0x00, size);
+
+  // This is a really terrible sorting algorithm I wrote on the spot.
+  // TODO: Replace this with quicksort or something. The reduced syscalls alone
+  //       should make it worthwhile.
+  while(sorted < sfat_header.node_count) {
+    uint32_t smallest_hash = 0;
+    for (char** i = file_list_unsorted; *i != NULL; i++) {
+      if (*i == (void*)1) {
+        continue;
+      }
+      // Hash and store the last string in the list that hasn't been eliminated yet
+      smallest_hash = sarc_filename_hash(*i, strlen(*i), sfat_header.hash_key);
+    }
+    for (char** i = file_list_unsorted; *i != NULL; i++) {
+      // Skip entries that have already been sorted
+      if (*i == (void*)1) {
+        continue;
+      }
+      uint32_t hash = sarc_filename_hash(*i, strlen(*i), sfat_header.hash_key); 
+      if (hash < smallest_hash) {
+        // By the end of the loop, smallest_hash will have the smallest hash.
+        smallest_hash = hash;
+      }
+    }
+    for (char** i = file_list_unsorted; *i != NULL; i++) {
+      if (*i == (void*)1) {
+        continue;
+      }
+      uint32_t hash = sarc_filename_hash(*i, strlen(*i), sfat_header.hash_key);
+      // Search for the smallest hash in the list, skipping sorted entries.
+      if (hash == smallest_hash) {
+        // Put the smallest hash next in the sorted list and free the original.
+        file_list[sorted++] = *i;
+        allocator.Free(*i); // Free it before we remove the pointer.
+        *i = (void*)1;
+        break;
+      }
+    }
+  }
+  allocator.Free(file_list_unsorted);
+
 
   // Skip over SFAT until we know what offsets things should be at
   PHYSFS_seek(arc, PHYSFS_tell(arc) + (sfat_header.node_count * sizeof(sarc_sfat_node)));
@@ -319,7 +367,7 @@ void rebuild_sarc(PHYSFS_Io* io) {
     sarc_sfat_node node = {
       .filename_hash = sarc_filename_hash(*i, strlen(*i), sfat_header.hash_key),
       .enable_offset = 0x0100,
-      .filename_offset = filename_pos - filename_start,
+      .filename_offset = (filename_pos - filename_start) / 4,
       .file_start_offset = file_write_pos - header.data_offset,
       .file_end_offset = file_write_pos + entry->size - header.data_offset
     };
@@ -333,14 +381,14 @@ void rebuild_sarc(PHYSFS_Io* io) {
     PHYSFS_writeBytes(arc, (void*)entry->data_ptr, entry->size);
     // Update our file write position and align to 4 byte boundary
     file_write_pos = PHYSFS_tell(arc);
-    while((file_write_pos % 4) != 0) {
+    while((file_write_pos % 8) != 0) {
       file_write_pos++;
     }
 
     PHYSFS_seek(arc, filename_pos);
     PHYSFS_writeBytes(arc, *i, strlen(*i)); // Write filenames
     // Jump to the next 4-byte alignment boundary.
-    while((PHYSFS_tell(arc) % 4) != 0) {
+    while(((PHYSFS_tell(arc) + 1) % 4) != 0) {
       PHYSFS_seek(arc, PHYSFS_tell(arc) + 1); // Jump forward 1 byte
     }
     filename_pos = PHYSFS_tell(arc) + 1;
