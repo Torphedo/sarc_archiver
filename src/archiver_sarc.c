@@ -23,6 +23,7 @@
 #include "sarc.h"
 #include "archiver_sarc.h"
 #include "physfs_utils.h"
+#include "vmem.h"
 
 static const char* module_name_info = "[\033[32mVFS::SARC\033[0m]";
 static const char* module_name_warn = "[\033[33mVFS::SARC\033[0m]";
@@ -208,23 +209,22 @@ PHYSFS_EnumerateCallbackResult callback_copy_files(void *data, const char *origd
 }
 
 PHYSFS_Io* SARC_openWrite(void *opaque, const char *name) {
-  // Work in progress.
   SARCinfo* info = (SARCinfo*) opaque;
 
   if (findEntry(info, name) == NULL) {
-     // File doesn't exist.
+     // File doesn't exist, early exit
      return NULL;
   }
 
+  // Copy file data to their own buffers for more expansion
   __PHYSFS_DirTree* tree = (__PHYSFS_DirTree *) &info->tree;
-
   __PHYSFS_DirTreeEnumerate(tree, "", callback_copy_files, "", opaque);
 
   info->open_write_handles++;
 
   SARCfileinfo* file_info = allocator.Malloc(sizeof(SARCfileinfo));
   if (file_info == NULL) {
-    printf("SARC_openWrite(): Failed to allocate %d bytes for SARCfileinfo.\n", sizeof(SARCfileinfo));
+    printf("%s SARC_openWrite(): Failed to allocate %li bytes for SARCfileinfo.\n", module_name_err, sizeof(SARCfileinfo));
     return NULL;
   }
   else {
@@ -236,18 +236,20 @@ PHYSFS_Io* SARC_openWrite(void *opaque, const char *name) {
 
   PHYSFS_Io* handle = allocator.Malloc(sizeof(PHYSFS_Io));
   if (handle == NULL) {
-    printf("SARC_openWrite(): Failed to allocate %d bytes for PHYSFS_Io return value.\n", sizeof(PHYSFS_Io));
+    printf("%s SARC_openWrite(): Failed to allocate %li bytes for PHYSFS_Io return value.\n", module_name_err, sizeof(PHYSFS_Io));
   }
   else {
+    // Use SARC_Io as our I/O handler.
     memcpy(handle, &SARC_Io, sizeof(*handle));
     handle->opaque = file_info;
   }
   return handle;
 } /* SARC_openWrite */
 
-// TODO: Make append actually append
 PHYSFS_Io *SARC_openAppend(void *opaque, const char *name) {
-  return SARC_openWrite(opaque, name);
+  PHYSFS_Io* io = SARC_openWrite(opaque, name);
+  io->seek(io, io->length(io)); // Move position to end of file
+  return io;
 } /* SARC_openAppend */
 
 void rebuild_sarc(PHYSFS_Io* io) {
@@ -403,11 +405,10 @@ void rebuild_sarc(PHYSFS_Io* io) {
   PHYSFS_freeList(file_list);
 }
 
-// Try to rebuild/flush archive to disk if all write handles are closed.
+// Rebuild archive and write to disk.
 void close_write_handle(PHYSFS_Io* io) {
   SARCinfo* info = io->opaque;
   info->open_write_handles--;
-
   rebuild_sarc(io);
 }
 
@@ -561,8 +562,40 @@ PHYSFS_sint64 SARC_read(PHYSFS_Io *io, void *buffer, PHYSFS_uint64 len) {
   return rc;
 } /* SARC_read */
 
-PHYSFS_sint64 SARC_write(PHYSFS_Io *io, const void *b, PHYSFS_uint64 len) {
-  BAIL(PHYSFS_ERR_READ_ONLY, -1);
+PHYSFS_sint64 SARC_write(PHYSFS_Io *io, const void* buf, PHYSFS_uint64 len) {
+  SARCfileinfo* finfo = (SARCfileinfo*) io->opaque;
+  SARCentry* entry = finfo->entry;
+
+  // Sanity checks.
+  if (buf == NULL) {
+    printf("%s SARC_write(): Trying to write %lli bytes from a nullptr!\n", module_name_err, len);
+    return -1;
+  }
+  // Most writes are under 4MiB... warn for unusally large individual writes,
+  // in case someone passed in a bad value.
+  if (len > 0x400000) {
+    // Sorry for the extremely long line.
+    printf("%s SARC_write(): Writing %lli bytes from a buffer at 0x%p. Writing will proceed normally, this is just a friendly alert that you might've passed a bad value.\n", module_name_warn, len, buf);
+  }
+
+  if ((void*)entry->data_ptr != NULL) {
+    // Not to jinx myself, but this should NEVER happen because opening a write
+    // handle automatically sets this up.
+    printf("%s SARC_write(): Tried to write to a file that isn't set up for writing.\n", module_name_err);
+    BAIL(PHYSFS_ERR_READ_ONLY, -1);
+  }
+  
+  // Since files open for writing are only in memory until they're flushed by
+  // closing the handle, we just do a memcpy.
+  if (finfo->curPos + len >= entry->size) {
+    // We're out of space, time to expand. Expand enough to fit this entire
+    // write plus 500 bytes.
+    virtual_commit((void*)entry->data_ptr, entry->size + len + 500);
+
+  }
+
+  memcpy((void*)entry->data_ptr, buf, len);
+  return 0;
 } /* SARC_write */
 
 PHYSFS_sint64 SARC_tell(PHYSFS_Io *io) {
