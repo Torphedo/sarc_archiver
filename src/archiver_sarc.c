@@ -17,6 +17,7 @@
 #include <stdlib.h>
 
 #include <physfs.h>
+#include <string.h>
 #define __PHYSICSFS_INTERNAL__
 #include <physfs_internal.h>
 
@@ -69,6 +70,7 @@ typedef struct {
   __PHYSFS_DirTree tree;
   PHYSFS_Io *io;
   uint32_t open_write_handles; // The number of write handles currently open to this archive
+  char* arc_filename;
 }SARCinfo;
 
 typedef struct {
@@ -209,6 +211,12 @@ PHYSFS_EnumerateCallbackResult callback_copy_files(void *data, const char *origd
 PHYSFS_Io* SARC_openWrite(void *opaque, const char *name) {
   // Work in progress.
   SARCinfo* info = (SARCinfo*) opaque;
+
+  if (findEntry(info, name) == NULL) {
+     // File doesn't exist.
+     return NULL;
+  }
+
   __PHYSFS_DirTree* tree = (__PHYSFS_DirTree *) &info->tree;
 
   __PHYSFS_DirTreeEnumerate(tree, "", callback_copy_files, "", opaque);
@@ -266,9 +274,15 @@ void rebuild_sarc(PHYSFS_Io* io) {
     .header_size = SFNT_HEADER_SIZE,
     .reserved = 0
   };
+  char* name = finfo->arc_info->arc_filename;
+  PHYSFS_File* arc = PHYSFS_openWrite(name);
+  if (arc == NULL) {
+    printf("%s rebuild_sarc(): Failed to open SARC file %s", module_name_err, name);
+    return;
+  }
 
   // We'll write these later, skip for now.
-  io->seek(io, sizeof(header) + sizeof(sfat_header));
+  PHYSFS_seek(arc, sizeof(header) + sizeof(sfat_header));
 
   __PHYSFS_DirTree* tree = &finfo->arc_info->tree;
   char** file_list = __PHYSFS_enumerateFilesTree(tree, "");
@@ -279,59 +293,68 @@ void rebuild_sarc(PHYSFS_Io* io) {
   }
 
   // Skip over SFAT until we know what offsets things should be at
-  io->seek(io, io->tell(io) + (sfat_header.node_count * sizeof(sarc_sfat_node)));
+  PHYSFS_seek(arc, PHYSFS_tell(arc) + (sfat_header.node_count * sizeof(sarc_sfat_node)));
 
   // Write SFNT
-  io->write(io, &sfnt_header, sizeof(sfnt_header));
-  for (char** i = file_list; *i != NULL; i++) {
-    io->write(io, *i, strlen(*i)); // Write filenames
+  PHYSFS_writeBytes(arc, &sfnt_header, sizeof(sfnt_header));
+  uint32_t filename_pos = PHYSFS_tell(arc);
+  const uint32_t filename_start = filename_pos;
 
-    // Jump to the next 4-byte alignment boundary.
-    while((io->tell(io) % 4) != 0) {
-      io->seek(io, io->tell(io) + 1); // Jump forward 1 byte
+  for (char** i = file_list; *i != NULL; i++) {
+    PHYSFS_seek(arc, PHYSFS_tell(arc) + strlen(*i) + 1);
+    while((PHYSFS_tell(arc) % 4) != 0) {
+      PHYSFS_seek(arc, PHYSFS_tell(arc) + 1);
     }
   }
 
-  header.data_offset = io->tell(io); // Now we know where files should start.
+  header.data_offset = PHYSFS_tell(arc); // Now we know where files should start.
   // This tracks where we are while writing files.
   uint32_t file_write_pos = header.data_offset;
 
-  // Time to write SFAT.
-  io->seek(io, sizeof(header)); // Jump to SFAT header location.
-  io->write(io, &sfat_header, sizeof(sfat_header));
+  // Time to write SFAT and SFNT filenames.
+  PHYSFS_seek(arc, sizeof(header)); // Jump to SFAT header location.
+  PHYSFS_writeBytes(arc, &sfat_header, sizeof(sfat_header));
   for (char** i = file_list; *i != NULL; i++) {
     SARCentry* entry = findEntry(finfo->arc_info, *i);
 
     sarc_sfat_node node = {
       .filename_hash = sarc_filename_hash(*i, strlen(*i), sfat_header.hash_key),
-      .file_attributes = 0,
-      .file_start_offset = file_write_pos,
-      .file_end_offset = file_write_pos + entry->size
+      .enable_offset = 0x0100,
+      .filename_offset = filename_pos - filename_start,
+      .file_start_offset = file_write_pos - header.data_offset,
+      .file_end_offset = file_write_pos + entry->size - header.data_offset
     };
-    uint32_t cur_pos = io->tell(io); // Save our spot
+    uint32_t cur_pos = PHYSFS_tell(arc); // Save our spot
     // Write the file data.
-    io->seek(io, file_write_pos);
+    PHYSFS_seek(arc, file_write_pos);
     if ((void*)entry->data_ptr == NULL) {
       printf("%s rebuild_sarc(): invalid file data pointer!\n", module_name_err);
       return;
     }
-    io->write(io, (void*)entry->data_ptr, entry->size);
+    PHYSFS_writeBytes(arc, (void*)entry->data_ptr, entry->size);
     // Update our file write position and align to 4 byte boundary
-    file_write_pos = io->tell(io);
+    file_write_pos = PHYSFS_tell(arc);
     while((file_write_pos % 4) != 0) {
       file_write_pos++;
     }
 
+    PHYSFS_seek(arc, filename_pos);
+    PHYSFS_writeBytes(arc, *i, strlen(*i)); // Write filenames
+    // Jump to the next 4-byte alignment boundary.
+    while((PHYSFS_tell(arc) % 4) != 0) {
+      PHYSFS_seek(arc, PHYSFS_tell(arc) + 1); // Jump forward 1 byte
+    }
+    filename_pos = PHYSFS_tell(arc) + 1;
+
     // Jump back to where we were, and write the SFAT node.
-    io->seek(io, cur_pos);
-    io->write(io, &node, sizeof(node));
+    PHYSFS_seek(arc, cur_pos);
+    PHYSFS_writeBytes(arc, &node, sizeof(node));
   }
   header.archive_size = file_write_pos;
-  io->seek(io, 0);
-  io->write(io, &header, sizeof(header));
+  PHYSFS_seek(arc, 0);
+  PHYSFS_writeBytes(arc, &header, sizeof(header));
   
   PHYSFS_freeList(file_list);
-
 }
 
 // Try to rebuild/flush archive to disk if all write handles are closed.
@@ -463,6 +486,9 @@ void* SARC_openArchive(PHYSFS_Io* io, const char* name, int forWriting, int* cla
 
   SARCinfo* archive = SARC_init_archive(io);
   BAIL_IF_ERRPASS(!archive, NULL);
+
+  archive->arc_filename = allocator.Malloc(strlen(name) + 1);
+  strcpy(archive->arc_filename, name);
 
   SARC_loadEntries(io, sfat_header.node_count, header.data_offset, archive);
   return archive;
