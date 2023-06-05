@@ -330,7 +330,6 @@ void rebuild_sarc(PHYSFS_Io* io) {
       if (hash == smallest_hash) {
         // Put the smallest hash next in the sorted list and free the original.
         file_list[sorted++] = *i;
-        allocator.Free(*i); // Free it before we remove the pointer.
         *i = (void*)1;
         break;
       }
