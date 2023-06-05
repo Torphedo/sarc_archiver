@@ -17,7 +17,6 @@
 #include <stdlib.h>
 
 #include <physfs.h>
-#include <string.h>
 #define __PHYSICSFS_INTERNAL__
 #include <physfs_internal.h>
 
