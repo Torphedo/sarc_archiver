@@ -27,4 +27,4 @@ void* SARC_addEntry(void* opaque, char* name, const int isdir, const PHYSFS_sint
 void* SARC_openArchive(PHYSFS_Io* io, const char* name, int forWriting, int* claimed);
 
 // Archiver structs to register
-const extern PHYSFS_Archiver archiver_sarc_default;
+const PHYSFS_Archiver archiver_sarc_default;
