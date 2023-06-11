@@ -1,9 +1,7 @@
-add_executable(sarc_archiver
-  "main.c"
-  "archiver_sarc.c"
-  "vmem.c"
-  "physfs_utils.c"
-)
+add_library(sarc_archiver STATIC "archiver_sarc.h" "archiver_sarc.c" "vmem.h" "vmem.c" "physfs_utils.h" "physfs_utils.c")
 
-target_link_libraries(sarc_archiver physfs-static)
+target_link_libraries(sarc_archiver PUBLIC physfs-static)
+target_include_directories(sarc_archiver PUBLIC "./")
 
+add_executable(sarc_archiver_test "main.c")
+target_link_libraries(sarc_archiver_test PUBLIC sarc_archiver)
