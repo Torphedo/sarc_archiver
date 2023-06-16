@@ -25,5 +25,7 @@ set(PHYSFS_ARCHIVE_ISO9660 FALSE)
 add_subdirectory(src)
 add_subdirectory(ext/physfs)
 
-file(COPY "data/" DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/src)
+if (EXISTS "data/")
+	file(COPY "data/" DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/src)
+endif()
 
