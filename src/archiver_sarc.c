@@ -518,27 +518,52 @@ bool SARC_loadEntries(PHYSFS_Io* io, uint32_t count, uint32_t files_offset, SARC
 void* SARC_openArchive(PHYSFS_Io* io, const char* name, int forWriting, int* claimed) {
   assert(io != NULL); // Sanity check.
 
-  static const char magic[] = "SARC";
-  sarc_header header = {0};
-  io->read(io, &header, sizeof(header));
+  if (!forWriting) {
+      static const char magic[] = "SARC";
+      sarc_header header = { 0 };
+      io->read(io, &header, sizeof(header));
 
-  if (strncmp((char*) &header.magic, magic, 4) != 0) {
-    BAIL(PHYSFS_ERR_UNSUPPORTED, NULL);
+      if (strncmp((char*)&header.magic, magic, 4) != 0) {
+          BAIL(PHYSFS_ERR_UNSUPPORTED, NULL);
+      }
+      // Claim the archive, because it's probably a valid SARC
+      *claimed = 1;
+
+      sarc_sfat_header sfat_header = { 0 };
+      io->read(io, &sfat_header, sizeof(sfat_header));
+
+      SARCinfo* archive = SARC_init_archive(io);
+      BAIL_IF_ERRPASS(!archive, NULL);
+
+      archive->arc_filename = allocator.Malloc(strlen(name) + 1);
+      strcpy(archive->arc_filename, name);
+
+      SARC_loadEntries(io, sfat_header.node_count, header.data_offset, archive);
+      return archive;
   }
-  // Claim the archive, because it's a valid SARC
-  *claimed = 1;
+  else {
+      // Claim the archive, because it's gonna be a valid SARC
+      *claimed = 1;
 
-  sarc_sfat_header sfat_header = {0};
-  io->read(io, &sfat_header, sizeof(sfat_header));
+      static const char magic[] = "SARC";
+      sarc_header header = { .header_size = 0x14, .byte_order_mark = 0xFEFF, .archive_size = 0x0, .data_offset = 0x48, .version = 0x100, .reserved = 0x00 };
+      memcpy(&header.magic, &magic, 4);
+      io->write(io, &header, sizeof(header));
 
-  SARCinfo* archive = SARC_init_archive(io);
-  BAIL_IF_ERRPASS(!archive, NULL);
+      static const char sfat_magic[] = "SFAT";
+      sarc_sfat_header sfat_header = { .header_size = 0xC, .node_count = 0x0, .hash_key = 0x65 };
+      memcpy(&sfat_header.magic, &sfat_magic, 4);
+      io->write(io, &sfat_header, sizeof(sfat_header));
 
-  archive->arc_filename = allocator.Malloc(strlen(name) + 1);
-  strcpy(archive->arc_filename, name);
+      SARCinfo* archive = SARC_init_archive(io);
+      BAIL_IF_ERRPASS(!archive, NULL);
 
-  SARC_loadEntries(io, sfat_header.node_count, header.data_offset, archive);
-  return archive;
+      archive->arc_filename = allocator.Malloc(strlen(name) + 1);
+      strcpy(archive->arc_filename, name);
+
+      SARC_loadEntries(io, sfat_header.node_count, header.data_offset, archive);
+      return archive;
+  }
 }
 
 
