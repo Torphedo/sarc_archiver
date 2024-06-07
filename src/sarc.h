@@ -61,7 +61,7 @@ typedef struct {
 
 // Hash code taken from here (almost verbatim):
 // https://mk8.tockdom.com/wiki/SARC_(File_Format)#File_Name_Hash
-uint32_t sarc_filename_hash(char* name, uint32_t length, uint32_t key) {
+static uint32_t sarc_filename_hash(char* name, uint32_t length, uint32_t key) {
   uint32_t result = 0;
   for (uint32_t i = 0; i < length; i++) {
     result = name[i] + (result * key);
