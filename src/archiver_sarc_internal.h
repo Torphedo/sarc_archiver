@@ -29,7 +29,3 @@ typedef struct {
 }SARC_file_ctx;
 
 SARCentry *findEntry(SARC_ctx* ctx, const char *path);
-
-static const char* module_name_info = "[\033[32mVFS::SARC\033[0m]";
-static const char* module_name_warn = "[\033[33mVFS::SARC\033[0m]";
-static const char* module_name_err = "[\033[31mVFS::SARC\033[0m]";

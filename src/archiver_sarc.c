@@ -25,6 +25,7 @@
 #include "archiver_sarc.h"
 #include "archiver_sarc_internal.h"
 #include "vmem.h"
+#include "logging.h"
 
 // TODO: See if we can track the number of open write handles, then rebuild the
 // SARC and turn it back into a normal read-only archive? It looks like calling
@@ -33,8 +34,10 @@
 const PHYSFS_Archiver archiver_sarc_default = {
   .version = 0,
   .info = {
+    // It'll work fine if we call the extension SARC, but slows everything down
+    // because it just tries every possible archiver. (I lose a full second when mounting 15000 archives)
     .extension = "pack",
-    .description = "An extension to support uncompressed SARC files with a .pack extension",
+    .description = "SARC for Zelda, Animal Crossing, Mario, Misc. Nintendo",
     .author = "Torphedo",
     .url = "https://github.com/Torphedo",
     .supportsSymlinks = false
@@ -134,7 +137,7 @@ SARC_openRead_failed:
 
 // Copy all file contents to newly allocated buffers
 PHYSFS_EnumerateCallbackResult callback_copy_files(void *data, const char *origdir, const char *fname) {
-  SARC_ctx* info = (SARC_ctx*)data;
+  SARC_ctx* ctx = (SARC_ctx*)data;
   char* full_path = __PHYSFS_smallAlloc(strlen(origdir) + strlen(fname) + 1);
   if (full_path == NULL) {
     return PHYSFS_ENUM_ERROR;
@@ -152,19 +155,19 @@ PHYSFS_EnumerateCallbackResult callback_copy_files(void *data, const char *origd
   PHYSFS_Stat statbuf = {0};
   PHYSFS_stat(full_path, &statbuf);
   if  (statbuf.filetype == PHYSFS_FILETYPE_DIRECTORY){
-    __PHYSFS_DirTreeEnumerate(&info->tree, full_path, callback_copy_files, full_path, data);
+    __PHYSFS_DirTreeEnumerate(&ctx->tree, full_path, callback_copy_files, full_path, data);
   }
   else {
     // We've finally got a full filename.
-    SARCentry* entry = findEntry(info, full_path);
+    SARCentry* entry = findEntry(ctx, full_path);
 
     // Store the file in a new buffer and store the pointer in the entry.
     entry->data_ptr = (uint64_t) allocator.Malloc(entry->size);
-    uint64_t pos = info->io->tell(info->io); // Save position
-    info->io->seek(info->io, entry->startPos);
-    info->io->read(info->io, (void*)entry->data_ptr, entry->size);
-    info->io->seek(info->io, pos); // Go back to saved position
-    printf("%s %s\n", module_name_info, full_path);
+    uint64_t pos = ctx->io->tell(ctx->io); // Save position
+    ctx->io->seek(ctx->io, entry->startPos);
+    ctx->io->read(ctx->io, (void*)entry->data_ptr, entry->size);
+    ctx->io->seek(ctx->io, pos); // Go back to saved position
+    LOG_MSG(info, "%s\n", full_path);
   }
 
   __PHYSFS_smallFree(full_path);
@@ -187,7 +190,7 @@ PHYSFS_Io* SARC_openWrite(void *opaque, const char *name) {
 
   SARC_file_ctx* file_info = allocator.Malloc(sizeof(SARC_file_ctx));
   if (file_info == NULL) {
-    printf("%s SARC_openWrite(): Failed to allocate %li bytes for SARC_file_ctx.\n", module_name_err, sizeof(SARC_file_ctx));
+    LOG_MSG(error, "Failed to allocate %li bytes for SARC_file_ctx.\n", sizeof(SARC_file_ctx));
     return NULL;
   }
   else {
@@ -199,7 +202,7 @@ PHYSFS_Io* SARC_openWrite(void *opaque, const char *name) {
 
   PHYSFS_Io* handle = allocator.Malloc(sizeof(PHYSFS_Io));
   if (handle == NULL) {
-    printf("%s SARC_openWrite(): Failed to allocate %li bytes for PHYSFS_Io return value.\n", module_name_err, sizeof(PHYSFS_Io));
+    LOG_MSG(error, "Failed to allocate %li bytes for PHYSFS_Io return value.\n", sizeof(PHYSFS_Io));
   }
   else {
     // Use SARC_Io as our I/O handler.

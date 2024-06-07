@@ -7,6 +7,7 @@
 #include "sarc_io.h"
 #include "vmem.h"
 #include "physfs_utils.h"
+#include "logging.h"
 
 // Update the SARC file on disk that this IO stream (file) belongs to.
 void rebuild_sarc(PHYSFS_Io* io) {
@@ -35,7 +36,7 @@ void rebuild_sarc(PHYSFS_Io* io) {
     char* name = file->arc_info->arc_filename;
     PHYSFS_File* arc = PHYSFS_openWrite(name);
     if (arc == NULL) {
-        printf("%s rebuild_sarc(): Failed to open SARC file %s", module_name_err, name);
+        LOG_MSG(error, "Failed to open SARC file %s", name);
         return;
     }
 
@@ -133,7 +134,7 @@ void rebuild_sarc(PHYSFS_Io* io) {
         // Write the file data.
         PHYSFS_seek(arc, file_write_pos);
         if ((void*)entry->data_ptr == NULL) {
-            printf("%s rebuild_sarc(): invalid file data pointer!\n", module_name_err);
+            LOG_MSG(error, "invalid file data pointer!\n");
             return;
         }
         PHYSFS_writeBytes(arc, (void*)entry->data_ptr, entry->size);
@@ -196,20 +197,20 @@ PHYSFS_sint64 SARC_write(PHYSFS_Io *io, const void* buf, PHYSFS_uint64 len) {
 
     // Sanity checks.
     if (buf == NULL) {
-        printf("%s SARC_write(): Trying to write %lli bytes from a nullptr!\n", module_name_err, len);
+        LOG_MSG(error, "Trying to write %lli bytes from a nullptr!\n", len);
         return -1;
     }
     // Most writes are under 4MiB... warn for unusally large individual writes,
     // in case someone passed in a bad value.
     if (len > 0x400000) {
         // Sorry for the extremely long line.
-        printf("%s SARC_write(): Writing %lli bytes from a buffer at 0x%p. Writing will proceed normally, this is just a friendly alert that you might've passed a bad value.\n", module_name_warn, len, buf);
+        LOG_MSG(warning, "Writing %lli bytes from a buffer at 0x%p. Writing will proceed normally, this is just a friendly alert that you might've passed a bad value.\n", len, buf);
     }
 
     if ((void*)entry->data_ptr != NULL) {
         // Not to jinx myself, but this should NEVER happen because opening a write
         // handle automatically sets this up.
-        printf("%s SARC_write(): Tried to write to a file that isn't set up for writing.\n", module_name_err);
+        LOG_MSG(error, "Tried to write to a file that isn't set up for writing.\n");
         BAIL(PHYSFS_ERR_READ_ONLY, -1);
     }
 

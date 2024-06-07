@@ -10,6 +10,7 @@
 
 #include "archiver_sarc.h"
 #include "physfs_utils.h"
+#include "logging.h"
 
 const char packname[] = "Armor_012_Upper.pack";
 
@@ -25,6 +26,7 @@ void increase_file_limit() {
 }
 
 int main(int argc, char** argv) {
+  enable_win_ansi();
   increase_file_limit();
 
   PHYSFS_init(argv[0]);
@@ -35,13 +37,14 @@ int main(int argc, char** argv) {
   PHYSFS_registerArchiver(&archiver_sarc_default);
 
   const PHYSFS_ArchiveInfo** i = NULL;
+  LOG_MSG(info, "The supported archive formats are:\n");
   for (i = PHYSFS_supportedArchiveTypes(); *i != NULL; i++) {
-    printf("main(): Supported archive: [%s], which is [%s].\n", (*i)->extension, (*i)->description);
+        printf("\t[%s] (%s).\n", (*i)->extension, (*i)->description);
   }
 
-  printf("Mounting all SARC archives...\n");
+  LOG_MSG(info, "Mounting all SARC archives...\n");
   mount_archive_recursive(".pack", "data", "/");
-  printf("Done.\n");
+  LOG_MSG(info, "Done.\n");
 
   char** file_list = PHYSFS_enumerateFiles("/");
 
@@ -49,7 +52,7 @@ int main(int argc, char** argv) {
       if (*i == NULL) {
           break;
       }
-      printf("We've got [%s]\n", *i);
+      LOG_MSG(info, "We've got [%s]\n", *i);
   }
   PHYSFS_freeList(file_list);
 

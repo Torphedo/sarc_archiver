@@ -4,6 +4,7 @@ add_library(sarc_archiver STATIC
     vmem.c
     physfs_utils.c
     sarc_io.c
+    logging.c
 )
 
 target_link_libraries(sarc_archiver PUBLIC physfs-static)

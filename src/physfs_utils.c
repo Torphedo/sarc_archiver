@@ -4,6 +4,7 @@
 #include <physfs_internal.h>
 
 #include "physfs_utils.h"
+#include "logging.h"
 
 typedef struct {
   char **list;
@@ -134,10 +135,6 @@ char** __PHYSFS_enumerateFilesTree(void* dir_tree, const char *path) {
   return data.file_list;
 } /* PHYSFS_enumerateFiles */
 
-static const char* module_name_info = "[\033[32mVFS\033[0m]";
-static const char* module_name_warn = "[\033[33mVFS\033[0m]";
-static const char* module_name_err = "[\033[31mVFS\033[0m]";
-
 bool path_has_extension(const char* path, const char* extension) {
     uint32_t pos = strlen(path);
     uint16_t ext_length = strlen(extension);
@@ -156,7 +153,7 @@ void mount_archive_recursive(const char* extension, const char* dir, const char*
 
     for (char** i = file_list; *i != NULL; i++) {
         if (*i == NULL) {
-            printf("%s mount_archive_recursive(): Something has gone terribly wrong with the filesystem.\n", module_name_err);
+            LOG_MSG(error, "Something has gone terribly wrong with the filesystem.\n");
             PHYSFS_freeList(file_list);
             return;
         }
@@ -166,16 +163,16 @@ void mount_archive_recursive(const char* extension, const char* dir, const char*
             // Get full virtual filesystem path.
             sprintf(full_path, "%s%s%s", dir, PHYSFS_getDirSeparator(), *i);
 
-            printf("%s: Mounting %s at %s\n", module_name_info, full_path, mountpoint);
+            LOG_MSG(info, "Mounting %s at %s\n", full_path, mountpoint);
 
             // Real search path + / or \ + filename
             sprintf(full_path, "%s%s%s%s", PHYSFS_getRealDir(full_path), dir, PHYSFS_getDirSeparator(), *i);
 
             // Mount to the current virtual directory.
-            uint32_t error = PHYSFS_mount(full_path, mountpoint, true);
+            uint32_t err = PHYSFS_mount(full_path, mountpoint, true);
 
-            if (error == 0) {
-                printf("%s Mount failed. Message: %s\n", module_name_err, PHYSFS_getLastError());
+            if (err == 0) {
+                LOG_MSG(error, "Mount failed. Message: %s\n", PHYSFS_getLastError());
             }
         }
     }
