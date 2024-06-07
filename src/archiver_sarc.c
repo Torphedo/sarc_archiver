@@ -138,7 +138,7 @@ SARC_openRead_failed:
 // Copy all file contents to newly allocated buffers
 PHYSFS_EnumerateCallbackResult callback_copy_files(void *data, const char *origdir, const char *fname) {
   SARC_ctx* ctx = (SARC_ctx*)data;
-  char* full_path = __PHYSFS_smallAlloc(strlen(origdir) + strlen(fname) + 1);
+  char* full_path = __PHYSFS_smallAlloc(strlen(origdir) + strlen(fname) + 2); // One for the slash and one for the null terminator.
   if (full_path == NULL) {
     return PHYSFS_ENUM_ERROR;
   }
@@ -178,8 +178,9 @@ PHYSFS_Io* SARC_openWrite(void *opaque, const char *name) {
   SARC_ctx* info = (SARC_ctx*) opaque;
 
   if (findEntry(info, name) == NULL) {
-     // File doesn't exist, early exit
-     return NULL;
+    // File doesn't exist, create it
+    SARCentry* entry = (SARCentry*) SARC_addEntry(opaque, name, 0, -1, -1, 0, 0);
+    //entry->data_ptr = (uint64_t) allocator.Malloc(entry->size);
   }
 
   // Copy file data to their own buffers for more expansion
@@ -223,7 +224,11 @@ int SARC_remove(void *opaque, const char *name) {
 } /* SARC_remove */
 
 int SARC_mkdir(void *opaque, const char *name) {
-  BAIL(PHYSFS_ERR_READ_ONLY, 0);
+  int retval = 1;
+  
+  retval = SARC_addEntry(opaque, name, 1, -1, -1, 0, 0) != 0;
+
+  return retval;
 } /* SARC_mkdir */
 
 int SARC_stat(void *opaque, const char *path, PHYSFS_Stat *stat) {
@@ -249,13 +254,13 @@ int SARC_stat(void *opaque, const char *path, PHYSFS_Stat *stat) {
   return 1;
 } /* SARC_stat */
 
-void* SARC_addEntry(void* opaque, char* name, const int isdir,
+void* SARC_addEntry(void* opaque, const char* name, const int isdir,
                     const PHYSFS_sint64 ctime, const PHYSFS_sint64 mtime,
                     const PHYSFS_uint64 pos, const PHYSFS_uint64 len) {
   SARC_ctx* info = (SARC_ctx*) opaque;
   SARCentry* entry;
 
-  entry = (SARCentry*) __PHYSFS_DirTreeAdd(&info->tree, name, isdir);
+  entry = (SARCentry*) __PHYSFS_DirTreeAdd(&info->tree, (char*)name, isdir);
   BAIL_IF_ERRPASS(!entry, NULL);
 
   entry->startPos = isdir ? 0 : pos;
@@ -324,24 +329,50 @@ void* SARC_openArchive(PHYSFS_Io* io, const char* name, int forWriting, int* cla
   assert(io != NULL); // Sanity check.
 
   static const char magic[] = "SARC";
-  sarc_header header = {0};
+  sarc_header header = { 0 };
+  bool headerMatches;
   io->read(io, &header, sizeof(header));
+  headerMatches = strncmp((char*)&header.magic, magic, 4) == 0;
 
-  if (strncmp((char*) &header.magic, magic, 4) != 0) {
-    BAIL(PHYSFS_ERR_UNSUPPORTED, NULL);
+  if (!forWriting && !headerMatches)
+      BAIL(PHYSFS_ERR_UNSUPPORTED, NULL);
+  if (!forWriting || headerMatches) {
+      // Claim the archive, because it's probably a valid SARC
+      *claimed = 1;
+
+      sarc_sfat_header sfat_header = { 0 };
+      io->read(io, &sfat_header, sizeof(sfat_header));
+
+      SARC_ctx* archive = SARC_init_archive(io);
+      BAIL_IF_ERRPASS(!archive, NULL);
+
+      archive->arc_filename = allocator.Malloc(strlen(name) + 1);
+      strcpy(archive->arc_filename, name);
+
+      SARC_loadEntries(io, sfat_header.node_count, header.data_offset, archive);
+      return archive;
   }
-  // Claim the archive, because it's a valid SARC
-  *claimed = 1;
+  else {
+      // Claim the archive, because it's gonna be a valid SARC
+      *claimed = 1;
 
-  sarc_sfat_header sfat_header = {0};
-  io->read(io, &sfat_header, sizeof(sfat_header));
+      static const char magic[] = "SARC";
+      sarc_header header = { .header_size = 0x14, .byte_order_mark = 0xFEFF, .archive_size = 0x0, .data_offset = 0x48, .version = 0x100, .reserved = 0x00 };
+      memcpy(&header.magic, &magic, 4);
+      io->write(io, &header, sizeof(header));
 
-  SARC_ctx* archive = SARC_init_archive(io);
-  BAIL_IF_ERRPASS(!archive, NULL);
+      static const char sfat_magic[] = "SFAT";
+      sarc_sfat_header sfat_header = { .header_size = 0xC, .node_count = 0x0, .hash_key = 0x65 };
+      memcpy(&sfat_header.magic, &sfat_magic, 4);
+      io->write(io, &sfat_header, sizeof(sfat_header));
 
-  archive->arc_filename = allocator.Malloc(strlen(name) + 1);
-  strcpy(archive->arc_filename, name);
+      SARC_ctx* archive = SARC_init_archive(io);
+      BAIL_IF_ERRPASS(!archive, NULL);
 
-  SARC_loadEntries(io, sfat_header.node_count, header.data_offset, archive);
-  return archive;
+      archive->arc_filename = allocator.Malloc(strlen(name) + 1);
+      strcpy(archive->arc_filename, name);
+
+      SARC_loadEntries(io, sfat_header.node_count, header.data_offset, archive);
+      return archive;
+  }
 }

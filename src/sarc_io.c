@@ -10,8 +10,8 @@
 #include "logging.h"
 
 // Update the SARC file on disk that this IO stream (file) belongs to.
-void rebuild_sarc(PHYSFS_Io* io) {
-    SARC_file_ctx* file = (SARC_file_ctx*)io->opaque;
+void rebuild_sarc(SARC_ctx* ctx) {
+    PHYSFS_Io* io = ctx->io;
 
     sarc_header header = {
         .magic = SARC_MAGIC,
@@ -33,17 +33,12 @@ void rebuild_sarc(PHYSFS_Io* io) {
         .header_size = SFNT_HEADER_SIZE,
         .reserved = 0
     };
-    char* name = file->arc_info->arc_filename;
-    PHYSFS_File* arc = PHYSFS_openWrite(name);
-    if (arc == NULL) {
-        LOG_MSG(error, "Failed to open SARC file %s", name);
-        return;
-    }
+    char* name = ctx->arc_filename;
 
     // We'll write these later, skip for now.
-    PHYSFS_seek(arc, sizeof(header) + sizeof(sfat_header));
+    io->seek(io, sizeof(header) + sizeof(sfat_header));
 
-    __PHYSFS_DirTree* tree = &file->arc_info->tree;
+    __PHYSFS_DirTree* tree = &ctx->tree;
     char** file_list_unsorted = __PHYSFS_enumerateFilesTree(tree, "");
 
     // Get file count first.
@@ -99,29 +94,29 @@ void rebuild_sarc(PHYSFS_Io* io) {
 
 
     // Skip over SFAT until we know what offsets things should be at
-    PHYSFS_seek(arc, PHYSFS_tell(arc) + (sfat_header.node_count * sizeof(sarc_sfat_node)));
+    io->seek(io, io->tell(io) + (sfat_header.node_count * sizeof(sarc_sfat_node)));
 
     // Write SFNT
-    PHYSFS_writeBytes(arc, &sfnt_header, sizeof(sfnt_header));
-    uint32_t filename_pos = PHYSFS_tell(arc);
+    io->write(io, &sfnt_header, sizeof(sfnt_header));
+    uint32_t filename_pos = io->tell(io);
     const uint32_t filename_start = filename_pos;
 
     for (char** i = file_list; *i != NULL; i++) {
-        PHYSFS_seek(arc, PHYSFS_tell(arc) + strlen(*i) + 1);
-        while((PHYSFS_tell(arc) % 4) != 0) {
-            PHYSFS_seek(arc, PHYSFS_tell(arc) + 1);
+        io->seek(io, io->tell(io) + strlen(*i) + 1);
+        while((io->tell(io) % 4) != 0) {
+            io->seek(io, io->tell(io) + 1);
         }
     }
 
-    header.data_offset = PHYSFS_tell(arc); // Now we know where files should start.
+    header.data_offset = io->tell(io); // Now we know where files should start.
     // This tracks where we are while writing files.
     uint32_t file_write_pos = header.data_offset;
 
     // Time to write SFAT and SFNT filenames.
-    PHYSFS_seek(arc, sizeof(header)); // Jump to SFAT header location.
-    PHYSFS_writeBytes(arc, &sfat_header, sizeof(sfat_header));
+    io->seek(io, sizeof(header)); // Jump to SFAT header location.
+    io->write(io, &sfat_header, sizeof(sfat_header));
     for (char** i = file_list; *i != NULL; i++) {
-        SARCentry* entry = findEntry(file->arc_info, *i);
+        SARCentry* entry = findEntry(ctx, *i);
 
         sarc_sfat_node node = {
             .filename_hash = sarc_filename_hash(*i, strlen(*i), sfat_header.hash_key),
@@ -130,44 +125,44 @@ void rebuild_sarc(PHYSFS_Io* io) {
             .file_start_offset = file_write_pos - header.data_offset,
             .file_end_offset = file_write_pos + entry->size - header.data_offset
         };
-        uint32_t cur_pos = PHYSFS_tell(arc); // Save our spot
+        uint32_t cur_pos = io->tell(io); // Save our spot
         // Write the file data.
-        PHYSFS_seek(arc, file_write_pos);
+        io->seek(io, file_write_pos);
         if ((void*)entry->data_ptr == NULL) {
             LOG_MSG(error, "invalid file data pointer!\n");
             return;
         }
-        PHYSFS_writeBytes(arc, (void*)entry->data_ptr, entry->size);
+        io->write(io, (void*)entry->data_ptr, entry->size);
         // Update our file write position and align to 4 byte boundary
-        file_write_pos = PHYSFS_tell(arc);
+        file_write_pos = io->tell(io);
         while((file_write_pos % 8) != 0) {
             file_write_pos++;
         }
 
-        PHYSFS_seek(arc, filename_pos);
-        PHYSFS_writeBytes(arc, *i, strlen(*i)); // Write filenames
+        io->seek(io, filename_pos);
+        io->write(io, *i, strlen(*i)); // Write filenames
         // Jump to the next 4-byte alignment boundary.
-        while(((PHYSFS_tell(arc) + 1) % 4) != 0) {
-            PHYSFS_seek(arc, PHYSFS_tell(arc) + 1); // Jump forward 1 byte
+        while(((io->tell(io) + 1) % 4) != 0) {
+            io->seek(io, io->tell(io) + 1); // Jump forward 1 byte
         }
-        filename_pos = PHYSFS_tell(arc) + 1;
+        filename_pos = io->tell(io) + 1;
 
         // Jump back to where we were, and write the SFAT node.
-        PHYSFS_seek(arc, cur_pos);
-        PHYSFS_writeBytes(arc, &node, sizeof(node));
+        io->seek(io, cur_pos);
+        io->write(io, &node, sizeof(node));
     }
     header.archive_size = file_write_pos;
-    PHYSFS_seek(arc, 0);
-    PHYSFS_writeBytes(arc, &header, sizeof(header));
+    io->seek(io, 0);
+    io->write(io, &header, sizeof(header));
 
     PHYSFS_freeList(file_list);
 }
 
 // Rebuild archive and write to disk.
 void close_write_handle(PHYSFS_Io* io) {
-    SARC_ctx* info = io->opaque;
-    info->open_write_handles--;
-    rebuild_sarc(io);
+    SARC_ctx* ctx = io->opaque;
+    ctx->open_write_handles--;
+    rebuild_sarc(ctx);
 }
 
 
@@ -207,7 +202,7 @@ PHYSFS_sint64 SARC_write(PHYSFS_Io *io, const void* buf, PHYSFS_uint64 len) {
         LOG_MSG(warning, "Writing %lli bytes from a buffer at 0x%p. Writing will proceed normally, this is just a friendly alert that you might've passed a bad value.\n", len, buf);
     }
 
-    if ((void*)entry->data_ptr != NULL) {
+    if ((void*)entry->data_ptr == NULL) {
         // Not to jinx myself, but this should NEVER happen because opening a write
         // handle automatically sets this up.
         LOG_MSG(error, "Tried to write to a file that isn't set up for writing.\n");
@@ -220,9 +215,10 @@ PHYSFS_sint64 SARC_write(PHYSFS_Io *io, const void* buf, PHYSFS_uint64 len) {
         // We're out of space, time to expand. Expand enough to fit this entire
         // write plus 500 bytes.
         virtual_commit((void*)entry->data_ptr, entry->size + len + 500);
+        entry->size += len;
     }
 
-    memcpy((void*)entry->data_ptr, buf, len);
+    file->io->write(file->io, buf, len);
     return 0;
 } /* SARC_write */
 

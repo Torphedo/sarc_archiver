@@ -29,3 +29,4 @@ typedef struct {
 }SARC_file_ctx;
 
 SARCentry *findEntry(SARC_ctx* ctx, const char *path);
+

@@ -17,6 +17,7 @@ int SARC_remove(void* opaque, const char* name);
 int SARC_mkdir(void* opaque, const char* name);
 int SARC_stat(void* opaque, const char* path, PHYSFS_Stat* stat);
 void* SARC_openArchive(PHYSFS_Io* io, const char* name, int forWriting, int* claimed);
+void* SARC_addEntry(void* opaque, const char* name, const int isdir, const PHYSFS_sint64 ctime, const PHYSFS_sint64 mtime, const PHYSFS_uint64 pos, const PHYSFS_uint64 len);
 
 // Archiver structs to register
 #ifdef __cplusplus
