@@ -1,4 +1,3 @@
-#include <Windows.h>
 #include <physfs.h>
 #define __PHYSICSFS_INTERNAL__
 #include <physfs_internal.h>
@@ -211,7 +210,7 @@ void resize_entry(SARCentry* entry, PHYSFS_uint64 len) {
     if (virtual_commit((void*)entry->data_ptr, commitSize) == -1) {
         void* newMemory = virtual_reserve(commitSize);
         virtual_free((void*)entry->data_ptr, entry->reserved);
-        entry->data_ptr = newMemory;
+        entry->data_ptr = (uintptr_t)newMemory;
     }
     entry->size = len;
     entry->reserved = commitSize;

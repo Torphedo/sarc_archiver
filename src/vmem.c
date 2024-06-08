@@ -159,3 +159,4 @@ int virtual_free(void* addr, uint64_t size) {
 	return 0; // What was freed was never reserved, so I guess it's a success.
 }
 #endif
+
