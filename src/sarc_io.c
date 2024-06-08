@@ -88,6 +88,7 @@ void rebuild_sarc(SARC_ctx* ctx) {
     memset(file_list, 0x00, size);
 
     // This is a really terrible sorting algorithm I wrote on the spot.
+    // TODO: See if __PHYSFS_sort() can be used here?
     // TODO: Replace this with quicksort or something. The reduced syscalls alone
     //       should make it worthwhile.
     while(sorted < sfat_header.node_count) {
@@ -200,6 +201,7 @@ void close_write_handle(PHYSFS_Io* io) {
     rebuild_sarc(ctx->arc_info);
 }
 
+// Resize a file's reserved memory region.
 void resize_entry(SARCentry* entry, PHYSFS_uint64 len) {
     uint64_t commitSize;
     if (len <= entry->reserved)
