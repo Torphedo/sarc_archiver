@@ -150,6 +150,7 @@ bool path_has_extension(const char* path, const char* extension) {
 void mount_archive_recursive(const char* extension, const char* dir, const char* mountpoint) {
 // Recursive Archive Mounter
     char** file_list = PHYSFS_enumerateFiles(dir);
+    char* base = PHYSFS_getBaseDir();
 
     for (char** i = file_list; *i != NULL; i++) {
         if (*i == NULL) {
@@ -166,7 +167,7 @@ void mount_archive_recursive(const char* extension, const char* dir, const char*
             LOG_MSG(info, "Mounting %s at %s\n", full_path, mountpoint);
 
             // Real search path + / or \ + filename
-            sprintf(full_path, "%s%s%s%s", PHYSFS_getRealDir(full_path), dir, PHYSFS_getDirSeparator(), *i);
+            sprintf(full_path, "%s%s%s%s", base, dir, PHYSFS_getDirSeparator(), *i);
 
             // Mount to the current virtual directory.
             uint32_t err = PHYSFS_mount(full_path, mountpoint, true);

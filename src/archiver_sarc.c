@@ -6,7 +6,7 @@
  * RULES: Archive entries must be uncompressed. Dirs and files allowed, but no
  *  symlinks, etc. We can relax some of these rules as necessary.
  *
- * ZSTD compression can be handled using a custom PHYSFS_Io interface.
+ * ZSTD compression will be handled using a custom PHYSFS_Io interface.
  *
  * Please see the file LICENSE.txt in the source's root directory.
  *
@@ -161,13 +161,14 @@ PHYSFS_EnumerateCallbackResult callback_copy_files(void *data, const char *origd
   }
   else { // We've finally got a full filename.
     // Store the file in a new buffer and store the pointer in the entry.
-    entry->data_ptr = (uint64_t) virtual_reserve(5000000);
+    entry->data_ptr = (uint64_t) virtual_reserve(0x500000);
     virtual_commit((void*)entry->data_ptr, entry->size);
+
     uint64_t pos = ctx->io->tell(ctx->io); // Save position
     ctx->io->seek(ctx->io, entry->startPos);
     ctx->io->read(ctx->io, (void*)entry->data_ptr, entry->size);
     ctx->io->seek(ctx->io, pos); // Go back to saved position
-    LOG_MSG(info, "%s\n", full_path);
+    LOG_MSG(debug, "%s\n", full_path);
   }
 
   __PHYSFS_smallFree(full_path);
@@ -200,7 +201,7 @@ PHYSFS_Io* SARC_openWrite(void *opaque, const char *name) {
     if (!newFile)
         file_info->io = info->io->duplicate(info->io);
     else
-        file_info->io = __PHYSFS_createMemoryIo(file_info->entry->data_ptr, 0, NULL);
+        file_info->io = __PHYSFS_createMemoryIo((void*)file_info->entry->data_ptr, 0, NULL);
     file_info->arc_info = opaque;
     file_info->open_for_write = 1;
   }
