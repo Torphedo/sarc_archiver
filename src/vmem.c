@@ -25,10 +25,10 @@
 #include <sys/mman.h>
 
 void* virtual_reserve(uint64_t size) {
-  return mmap(NULL, size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  return mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 }
 int virtual_commit(void* addr, uint64_t size) {
-  return mprotect(addr, size, PROT_READ | PROT_WRITE);
+  return 0;
 }
 int virtual_free(void* addr, uint64_t size) {
   return munmap(addr, size);
@@ -42,10 +42,9 @@ void* virtual_reserve(uint64_t size) {
   return VirtualAlloc(NULL, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
 }
 int virtual_commit(void* addr, uint64_t size) {
-  if (VirtualAlloc(addr, size, MEM_COMMIT, PAGE_READWRITE))
-    return 0;
-  else
-    return -1;
+  // We reserve with MEM_RESERVE | MEM_COMMIT, so Windows will automatically
+  // commit physical memory as needed when we write to the memory.
+  return 0;
 }
 int virtual_free(void* addr, uint64_t size) {
   if (VirtualFree(addr, 0, MEM_RELEASE))
