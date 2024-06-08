@@ -42,10 +42,7 @@ void* virtual_reserve(uint64_t size) {
   return VirtualAlloc(NULL, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
 }
 int virtual_commit(void* addr, uint64_t size) {
-  if (VirtualAlloc(addr, size, MEM_COMMIT, PAGE_READWRITE))
-    return 0;
-  else
-    return -1;
+	return 0;
 }
 int virtual_free(void* addr, uint64_t size) {
   if (VirtualFree(addr, 0, MEM_RELEASE))
