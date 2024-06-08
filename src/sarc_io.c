@@ -1,3 +1,4 @@
+#include <Windows.h>
 #include <physfs.h>
 #define __PHYSICSFS_INTERNAL__
 #include <physfs_internal.h>
@@ -160,9 +161,10 @@ void rebuild_sarc(SARC_ctx* ctx) {
 
 // Rebuild archive and write to disk.
 void close_write_handle(PHYSFS_Io* io) {
-    SARC_ctx* ctx = io->opaque;
-    ctx->open_write_handles--;
-    rebuild_sarc(ctx);
+    SARC_file_ctx* ctx = io->opaque;
+    ctx->arc_info->open_write_handles--;
+    //if (ctx->arc_info->open_write_handles == 0)
+    rebuild_sarc(ctx->arc_info);
 }
 
 
@@ -214,11 +216,20 @@ PHYSFS_sint64 SARC_write(PHYSFS_Io *io, const void* buf, PHYSFS_uint64 len) {
     if (file->curPos + len >= entry->size) {
         // We're out of space, time to expand. Expand enough to fit this entire
         // write plus 500 bytes.
-        virtual_commit((void*)entry->data_ptr, entry->size + len + 500);
+        //if (file->curPos + len >= entry->size + 500)
+        SYSTEM_INFO sysInfo;
+        GetSystemInfo(&sysInfo);
+        DWORD dwPageSize = sysInfo.dwPageSize;
+
+        //if (!virtual_commit((void*)entry->data_ptr, (((entry->size + len + 500) / dwPageSize) + 1) * dwPageSize))
+        //    int problem = GetLastError();
+        (void*)entry->data_ptr = allocator.Realloc((void*)entry->data_ptr, entry->size + len + 500);
         entry->size += len;
     }
 
-    file->io->write(file->io, buf, len);
+    memcpy((void*)((char*)entry->data_ptr + ((SARC_file_ctx*)io->opaque)->curPos), buf, len);
+    ((SARC_file_ctx*)io->opaque)->curPos += len;
+
     return 0;
 } /* SARC_write */
 

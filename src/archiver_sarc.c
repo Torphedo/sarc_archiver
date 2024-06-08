@@ -176,11 +176,11 @@ PHYSFS_EnumerateCallbackResult callback_copy_files(void *data, const char *origd
 
 PHYSFS_Io* SARC_openWrite(void *opaque, const char *name) {
   SARC_ctx* info = (SARC_ctx*) opaque;
+  bool newFile = findEntry(info, name) == NULL;
 
-  if (findEntry(info, name) == NULL) {
+  if (newFile) {
     // File doesn't exist, create it
     SARCentry* entry = (SARCentry*) SARC_addEntry(opaque, name, 0, -1, -1, 0, 0);
-    //entry->data_ptr = (uint64_t) allocator.Malloc(entry->size);
   }
 
   // Copy file data to their own buffers for more expansion
@@ -197,7 +197,10 @@ PHYSFS_Io* SARC_openWrite(void *opaque, const char *name) {
   else {
     file_info->curPos = 0;
     file_info->entry = findEntry(info, name);
-    file_info->io = info->io->duplicate(info->io);
+    if (!newFile)
+        file_info->io = info->io->duplicate(info->io);
+    else
+        file_info->io = __PHYSFS_createMemoryIo(file_info->entry->data_ptr, 0, NULL);
     file_info->arc_info = opaque;
   }
 
@@ -281,6 +284,7 @@ void* SARC_init_archive(PHYSFS_Io* io) {
     return NULL;
   }
   info->io = io;
+  info->open_write_handles = 0;
 
   return info;
 }
