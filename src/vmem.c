@@ -39,13 +39,19 @@ int virtual_free(void* addr, uint64_t size) {
 #include <Windows.h>
 
 void* virtual_reserve(uint64_t size) {
-  return VirtualAlloc(NULL, size, MEM_RESERVE, PAGE_READWRITE);
+  return VirtualAlloc(NULL, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
 }
 int virtual_commit(void* addr, uint64_t size) {
-  return VirtualAlloc(addr, size, MEM_COMMIT, PAGE_READWRITE);
+  if (VirtualAlloc(addr, size, MEM_COMMIT, PAGE_READWRITE))
+    return 0;
+  else
+    return -1;
 }
 int virtual_free(void* addr, uint64_t size) {
-  return VirtualFree(addr, 0, MEM_RELEASE);
+  if (VirtualFree(addr, 0, MEM_RELEASE))
+    return 0;
+  else
+	return -1;
 }
 #endif
 

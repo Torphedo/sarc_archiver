@@ -115,6 +115,9 @@ PHYSFS_Io *SARC_openRead(void *opaque, const char *name) {
   // Give IO our archiver info
   file->arc_info = opaque;
 
+  // Can't do write operations
+  file->open_for_write = 0;
+
   // Set SARC_Io as the I/O handler for this archiver
   memcpy(retval, &SARC_Io, sizeof (*retval));
   retval->opaque = file;
@@ -152,17 +155,14 @@ PHYSFS_EnumerateCallbackResult callback_copy_files(void *data, const char *origd
     sprintf(full_path, "%s/%s", origdir, fname);
   }
 
-  PHYSFS_Stat statbuf = {0};
-  PHYSFS_stat(full_path, &statbuf);
-  if  (statbuf.filetype == PHYSFS_FILETYPE_DIRECTORY){
+  SARCentry* entry = findEntry(ctx, full_path);
+  if  (entry->tree.isdir){
     __PHYSFS_DirTreeEnumerate(&ctx->tree, full_path, callback_copy_files, full_path, data);
   }
-  else {
-    // We've finally got a full filename.
-    SARCentry* entry = findEntry(ctx, full_path);
-
+  else { // We've finally got a full filename.
     // Store the file in a new buffer and store the pointer in the entry.
-    entry->data_ptr = (uint64_t) allocator.Malloc(entry->size);
+    entry->data_ptr = (uint64_t) virtual_reserve(5000000);
+    virtual_commit((void*)entry->data_ptr, entry->size);
     uint64_t pos = ctx->io->tell(ctx->io); // Save position
     ctx->io->seek(ctx->io, entry->startPos);
     ctx->io->read(ctx->io, (void*)entry->data_ptr, entry->size);
@@ -176,7 +176,7 @@ PHYSFS_EnumerateCallbackResult callback_copy_files(void *data, const char *origd
 
 PHYSFS_Io* SARC_openWrite(void *opaque, const char *name) {
   SARC_ctx* info = (SARC_ctx*) opaque;
-  bool newFile = findEntry(info, name) == NULL;
+  int newFile = findEntry(info, name) == NULL;
 
   if (newFile) {
     // File doesn't exist, create it
@@ -202,6 +202,7 @@ PHYSFS_Io* SARC_openWrite(void *opaque, const char *name) {
     else
         file_info->io = __PHYSFS_createMemoryIo(file_info->entry->data_ptr, 0, NULL);
     file_info->arc_info = opaque;
+    file_info->open_for_write = 1;
   }
 
   PHYSFS_Io* handle = allocator.Malloc(sizeof(PHYSFS_Io));
