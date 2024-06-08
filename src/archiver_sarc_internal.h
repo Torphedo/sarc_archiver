@@ -9,6 +9,7 @@ typedef struct {
     __PHYSFS_DirTreeEntry tree;
     PHYSFS_uint64 startPos;
     PHYSFS_uint64 size;
+    PHYSFS_uint64 reserved;
     uintptr_t data_ptr; // Files open for write will store a pointer here instead of an offset.
 }SARCentry;
 
@@ -24,6 +25,7 @@ typedef struct {
 typedef struct {
     PHYSFS_Io *io;
     SARCentry *entry;
+    int open_for_write;
     SARC_ctx* arc_info;
     PHYSFS_uint32 curPos;
 }SARC_file_ctx;

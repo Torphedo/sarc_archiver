@@ -1,3 +1,4 @@
+#include <Windows.h>
 #include <physfs.h>
 #define __PHYSICSFS_INTERNAL__
 #include <physfs_internal.h>
@@ -8,6 +9,40 @@
 #include "vmem.h"
 #include "physfs_utils.h"
 #include "logging.h"
+
+uint32_t get_file_list_count(__PHYSFS_DirTreeEntry* entry) {
+    uint32_t retval = 0;
+
+    while (entry != NULL) {
+        if (!entry->isdir)
+            retval++;
+        else
+            retval += get_file_list_count(entry->children);
+        entry = entry->sibling;
+    }
+
+    return retval;
+}
+
+void write_file_list(__PHYSFS_DirTreeEntry* entry, char** arr, int currentIndex) {
+    while (entry != NULL) {
+        if (!entry->isdir) {
+            arr[currentIndex] = entry->name;
+            currentIndex++;
+        }
+        else
+            write_file_list(entry->children, arr, currentIndex);
+        entry = entry->sibling;
+    }
+}
+
+char** get_file_list(__PHYSFS_DirTreeEntry* entry) {
+    uint32_t count = get_file_list_count(entry);
+    char** retval = allocator.Malloc(sizeof(char*) * (count + 1));
+    write_file_list(entry, retval, 0);
+    retval[count] = NULL;
+    return retval;
+}
 
 // Update the SARC file on disk that this IO stream (file) belongs to.
 void rebuild_sarc(SARC_ctx* ctx) {
@@ -39,7 +74,7 @@ void rebuild_sarc(SARC_ctx* ctx) {
     io->seek(io, sizeof(header) + sizeof(sfat_header));
 
     __PHYSFS_DirTree* tree = &ctx->tree;
-    char** file_list_unsorted = __PHYSFS_enumerateFilesTree(tree, "");
+    char** file_list_unsorted = get_file_list(tree->root);
 
     // Get file count first.
     for (char** i = file_list_unsorted; *i != NULL; i++) {
@@ -155,16 +190,32 @@ void rebuild_sarc(SARC_ctx* ctx) {
     io->seek(io, 0);
     io->write(io, &header, sizeof(header));
 
-    PHYSFS_freeList(file_list);
+    allocator.Free(file_list);
 }
 
 // Rebuild archive and write to disk.
 void close_write_handle(PHYSFS_Io* io) {
-    SARC_ctx* ctx = io->opaque;
-    ctx->open_write_handles--;
-    rebuild_sarc(ctx);
+    SARC_file_ctx* ctx = io->opaque;
+    ctx->arc_info->open_write_handles--;
+    //if (ctx->arc_info->open_write_handles == 0)
+    rebuild_sarc(ctx->arc_info);
 }
 
+void resize_entry(SARCentry* entry, PHYSFS_uint64 len) {
+    uint64_t commitSize;
+    if (len <= entry->reserved)
+        commitSize = len;
+    else
+        commitSize = len + 500;
+
+    if (virtual_commit((void*)entry->data_ptr, commitSize) == -1) {
+        void* newMemory = virtual_reserve(commitSize);
+        virtual_free((void*)entry->data_ptr, entry->reserved);
+        entry->data_ptr = newMemory;
+    }
+    entry->size = len;
+    entry->reserved = commitSize;
+}
 
 // PHYSFS_Io implementation for SARC
 
@@ -214,11 +265,13 @@ PHYSFS_sint64 SARC_write(PHYSFS_Io *io, const void* buf, PHYSFS_uint64 len) {
     if (file->curPos + len >= entry->size) {
         // We're out of space, time to expand. Expand enough to fit this entire
         // write plus 500 bytes.
-        virtual_commit((void*)entry->data_ptr, entry->size + len + 500);
-        entry->size += len;
+
+        resize_entry(entry, entry->size + len);
     }
 
-    file->io->write(file->io, buf, len);
+    memcpy((void*)((char*)entry->data_ptr + ((SARC_file_ctx*)io->opaque)->curPos), buf, len);
+    ((SARC_file_ctx*)io->opaque)->curPos += len;
+
     return 0;
 } /* SARC_write */
 
@@ -229,11 +282,12 @@ PHYSFS_sint64 SARC_tell(PHYSFS_Io *io) {
 int SARC_seek(PHYSFS_Io *io, PHYSFS_uint64 offset) {
     SARC_file_ctx* file = (SARC_file_ctx*)io->opaque;
     const SARCentry *entry = file->entry;
-    int rc;
+    int rc = 0;
 
-    BAIL_IF(offset >= entry->size, PHYSFS_ERR_PAST_EOF, 0);
-    rc = file->io->seek(file->io, entry->startPos + offset);
-    if (rc) {
+    BAIL_IF(offset > entry->size, PHYSFS_ERR_PAST_EOF, 0);
+    if (!file->open_for_write)
+        rc = file->io->seek(file->io, entry->startPos + offset);
+    if (rc || file->open_for_write) {
         file->curPos = (PHYSFS_uint32) offset;
     }
 
