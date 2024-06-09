@@ -14,20 +14,28 @@
 
 const char packname[] = "Armor_012_Upper.pack";
 
-void increase_file_limit() {
+bool increase_file_limit() {
     struct rlimit rlim;
     int err = getrlimit(RLIMIT_NOFILE, &rlim);
     if (err < 0) {
-        printf("Failed to get rlimit...\n");
-        return;
+        LOG_MSG(error, "Failed to get rlimit (code %d)\n", err);
+        return false;
     }
-    rlim.rlim_cur = 15100;
-    setrlimit(RLIMIT_NOFILE, &rlim);
+    rlim.rlim_cur = 200100;
+    err = setrlimit(RLIMIT_NOFILE, &rlim);
+    if (err < 0) {
+        LOG_MSG(error, "Failed to set rlimit (code %d)\n", err);
+        return false;
+    }
+    return true;
 }
+
 
 int main(int argc, char** argv) {
   enable_win_ansi();
-  increase_file_limit();
+  if (!increase_file_limit()) {
+      return 1;
+  }
 
   PHYSFS_init(argv[0]);
 
@@ -93,6 +101,8 @@ int main(int argc, char** argv) {
 
           PHYSFS_close(file);
       }
+
+      allocator.Free(names);
   }
 
   LOG_MSG(info, "VFS shutdown\n");
