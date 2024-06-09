@@ -23,11 +23,11 @@ uint32_t get_file_list_count(__PHYSFS_DirTreeEntry* entry) {
     return retval;
 }
 
-void write_file_list(__PHYSFS_DirTreeEntry* entry, char** arr, int currentIndex) {
+void write_file_list(__PHYSFS_DirTreeEntry* entry, char** arr, int* currentIndex) {
     while (entry != NULL) {
         if (!entry->isdir) {
-            arr[currentIndex] = entry->name;
-            currentIndex++;
+            arr[*currentIndex] = entry->name;
+            (*currentIndex)++;
         }
         else
             write_file_list(entry->children, arr, currentIndex);
@@ -38,7 +38,9 @@ void write_file_list(__PHYSFS_DirTreeEntry* entry, char** arr, int currentIndex)
 char** get_file_list(__PHYSFS_DirTreeEntry* entry) {
     uint32_t count = get_file_list_count(entry);
     char** retval = allocator.Malloc(sizeof(char*) * (count + 1));
-    write_file_list(entry, retval, 0);
+    memset(retval, 0x0, sizeof(char*) * (count + 1));
+    int currentIndex = 0;
+    write_file_list(entry, retval, &currentIndex);
     retval[count] = NULL;
     return retval;
 }
@@ -175,12 +177,14 @@ void rebuild_sarc(SARC_ctx* ctx) {
         }
 
         io->seek(io, filename_pos);
-        io->write(io, *i, strlen(*i)); // Write filenames
+        io->write(io, *i, strlen(*i) + 1); // Write filenames
         // Jump to the next 4-byte alignment boundary.
-        while(((io->tell(io) + 1) % 4) != 0) {
-            io->seek(io, io->tell(io) + 1); // Jump forward 1 byte
+        while(((io->tell(io)) % 4) != 0) {
+            char null = 0x0;
+            io->write(io, &null, 1); // Jump forward 1 byte
+            //io->seek(io, io->tell(io) + 1); 
         }
-        filename_pos = io->tell(io) + 1;
+        filename_pos = io->tell(io);
 
         // Jump back to where we were, and write the SFAT node.
         io->seek(io, cur_pos);
@@ -189,6 +193,8 @@ void rebuild_sarc(SARC_ctx* ctx) {
     header.archive_size = file_write_pos;
     io->seek(io, 0);
     io->write(io, &header, sizeof(header));
+
+    io->trunc(io, file_write_pos);
 
     allocator.Free(file_list);
 }
@@ -298,6 +304,12 @@ int SARC_seek(PHYSFS_Io *io, PHYSFS_uint64 offset) {
 PHYSFS_sint64 SARC_length(PHYSFS_Io *io) {
     const SARC_file_ctx* file = (SARC_file_ctx*)io->opaque;
     return ((PHYSFS_sint64) file->entry->size);
+} /* SARC_length */
+
+int SARC_trunc(PHYSFS_Io* io, PHYSFS_uint64 len) {
+    const SARC_file_ctx* file = (SARC_file_ctx*)io->opaque;
+    (PHYSFS_sint64)file->entry->size = len;
+    return 1;
 } /* SARC_length */
 
 PHYSFS_Io *SARC_duplicate(PHYSFS_Io *_io) {
