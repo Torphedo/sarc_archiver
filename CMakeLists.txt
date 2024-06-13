@@ -24,6 +24,45 @@ set(PHYSFS_ARCHIVE_ISO9660 FALSE CACHE BOOL "" FORCE)
 
 set(SARC_ARCHIVER_BUILD_TEST TRUE CACHE BOOL "" FORCE)
 
+include_directories("ext/zstd/lib")
+add_library(zstd STATIC
+	ext/zstd/doc/educational_decoder/harness.c
+	ext/zstd/doc/educational_decoder/zstd_decompress.c
+	ext/zstd/lib/compress/hist.c
+	ext/zstd/lib/compress/zstdmt_compress.c
+	ext/zstd/lib/compress/zstd_compress_literals.c
+	ext/zstd/lib/compress/zstd_compress_sequences.c
+	ext/zstd/lib/compress/zstd_compress_superblock.c
+	ext/zstd/lib/compress/zstd_opt.c
+	ext/zstd/lib/compress/zstd_ldm.c
+	ext/zstd/lib/compress/zstd_lazy.c
+	ext/zstd/lib/compress/zstd_double_fast.c
+	ext/zstd/lib/compress/fse_compress.c
+	ext/zstd/lib/compress/huf_compress.c
+	ext/zstd/lib/compress/zstd_fast.c
+	ext/zstd/lib/compress/zstd_compress.c
+	ext/zstd/lib/decompress/zstd_ddict.c
+	ext/zstd/lib/decompress/zstd_decompress_block.c
+	ext/zstd/lib/decompress/huf_decompress.c
+	ext/zstd/lib/decompress/zstd_decompress.c
+	ext/zstd/lib/dictBuilder/divsufsort.c
+	ext/zstd/lib/dictBuilder/cover.c
+	ext/zstd/lib/dictBuilder/fastcover.c
+	ext/zstd/lib/dictBuilder/zdict.c
+	ext/zstd/lib/common/zstd_common.c
+	ext/zstd/lib/common/error_private.c
+	ext/zstd/lib/common/xxhash.c
+	ext/zstd/lib/common/fse_decompress.c
+	ext/zstd/lib/common/debug.c
+	ext/zstd/lib/common/threading.c
+	ext/zstd/lib/common/pool.c
+	ext/zstd/lib/common/entropy_common.c
+)
+
+# I can't be bothered to make sure the x86 assembly file is removed from the
+# source list on ARM64 builds
+target_compile_definitions(zstd PRIVATE ZSTD_DISABLE_ASM)
+
 add_subdirectory(src)
 add_subdirectory(ext/physfs)
 

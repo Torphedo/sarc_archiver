@@ -1,3 +1,8 @@
+# Files used in testing
+*.zsdic
+*.pack
+*.pack.zs
+
 # Build output
 out/
 

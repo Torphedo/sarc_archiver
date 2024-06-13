@@ -16,20 +16,28 @@
 
 const char packname[] = "Armor_012_Upper.pack";
 
-void increase_file_limit() {
+bool increase_file_limit() {
     struct rlimit rlim;
     int err = getrlimit(RLIMIT_NOFILE, &rlim);
     if (err < 0) {
-        printf("Failed to get rlimit...\n");
-        return;
+        LOG_MSG(error, "Failed to get rlimit (code %d)\n", err);
+        return false;
     }
-    rlim.rlim_cur = 15100;
-    setrlimit(RLIMIT_NOFILE, &rlim);
+    rlim.rlim_cur = 200100;
+    err = setrlimit(RLIMIT_NOFILE, &rlim);
+    if (err < 0) {
+        LOG_MSG(error, "Failed to set rlimit (code %d)\n", err);
+        return false;
+    }
+    return true;
 }
+
 
 int main(int argc, char** argv) {
   enable_win_ansi();
-  increase_file_limit();
+  if (!increase_file_limit()) {
+      return 1;
+  }
 
   PHYSFS_init(argv[0]);
 
@@ -46,11 +54,10 @@ int main(int argc, char** argv) {
   }
 
   LOG_MSG(info, "Mounting all SARC archives...\n");
-  mount_archive_recursive(".pack", "data", "/");
+  mount_archive_recursive(".pack.zs", "data", "/");
   LOG_MSG(info, "Done.\n");
 
   char** file_list = PHYSFS_enumerateFiles("/");
-
   for (char** i = file_list; *i != NULL; i++) {
       if (*i == NULL) {
           break;
@@ -59,41 +66,46 @@ int main(int argc, char** argv) {
   }
   PHYSFS_freeList(file_list);
 
-  const char* archives[] = {
-      "archive.pack",
-      "archive2.pack",
+  char* files[] = {
+      "Component/ArmorParam/Armor_012_Upper.game__component__ArmorParam.bgyml",
   };
 
-  for (unsigned int i = 0; i < sizeof(archives) / sizeof(*archives); i++) {
-      // Create new archive
-      PHYSFS_file* f = PHYSFS_openWrite(archives[i]);
-      PHYSFS_close(f);
+  for (unsigned int i = 0; i < sizeof(files) / sizeof(*files); i++) {
+      int name_count = 0;
+      const char** names;
+      PHYSFS_getRealDirs(files[i], &names, &name_count);
 
-      // Write dir juggling
-      char* old_write_dir_temp = PHYSFS_getWriteDir();
-      char* old_write_dir = allocator.Malloc(strlen(old_write_dir_temp) + 1);
-      if (old_write_dir == NULL) {
-          LOG_MSG(error, "Alloc failed for old write dir!\n");
-          break;
+      for (int j = 0; j < name_count; j++) {
+          LOG_MSG(debug, "The file is part of %s\n", names[j]);
+          // Create archive
+          PHYSFS_file* arc = PHYSFS_openWrite(names[j]);
+          PHYSFS_close(arc);
+
+          // Write dir juggling
+          char* old_write_dir_temp = PHYSFS_getWriteDir();
+          char* old_write_dir = allocator.Malloc(strlen(old_write_dir_temp) + 1);
+          if (old_write_dir == NULL) {
+              LOG_MSG(error, "Alloc failed for old write dir!\n");
+              break;
+          }
+          strcpy(old_write_dir, old_write_dir_temp);
+
+          // Set the new write dir to our archive
+          PHYSFS_setWriteDir(names[j]);
+
+          PHYSFS_mkdir("Component/ArmorParam");
+
+          PHYSFS_file* file = PHYSFS_openWrite(files[i]);
+
+          // Write dir juggling
+          PHYSFS_setWriteDir(old_write_dir);
+          allocator.Free(old_write_dir);
+
+          PHYSFS_close(file);
       }
-      strcpy(old_write_dir, old_write_dir_temp);
 
-      // Set the new write dir to our archive
-      PHYSFS_setWriteDir(archives[i]);
-      PHYSFS_mkdir("Component/ArmorParam");
-
-      PHYSFS_file* file = PHYSFS_openWrite("Component/ArmorParam/file.bgyml");
-
-      PHYSFS_file* test_file = PHYSFS_openWrite("Component/ArmorParam/Armor_012_Upper.game__component__ArmorParam.bgyml");
-
-      // Write dir juggling
-      PHYSFS_setWriteDir(old_write_dir);
-      allocator.Free(old_write_dir);
-
-      PHYSFS_close(file);
-      PHYSFS_close(test_file);
+      allocator.Free(names);
   }
-
 
   LOG_MSG(info, "VFS shutdown\n");
   PHYSFS_deinit();
