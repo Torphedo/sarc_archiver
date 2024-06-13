@@ -308,9 +308,9 @@ PHYSFS_sint64 SARC_length(PHYSFS_Io *io) {
 
 int SARC_trunc(PHYSFS_Io* io, PHYSFS_uint64 len) {
     const SARC_file_ctx* file = (SARC_file_ctx*)io->opaque;
-    (PHYSFS_sint64)file->entry->size = len;
+    file->entry->size = len;
     return 1;
-} /* SARC_length */
+} /* SARC_trunc */
 
 PHYSFS_Io *SARC_duplicate(PHYSFS_Io *_io) {
     SARC_file_ctx *original_file = (SARC_file_ctx*)_io->opaque;
