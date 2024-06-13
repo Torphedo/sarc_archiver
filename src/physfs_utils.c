@@ -3,6 +3,7 @@
 #define __PHYSICSFS_INTERNAL__
 #include <physfs_internal.h>
 
+#include "zstd_io.h"
 #include "physfs_utils.h"
 #include "logging.h"
 
@@ -146,9 +147,15 @@ bool path_has_extension(const char* path, const char* extension) {
     return (strncmp(&path[pos - ext_length], extension, ext_length) == 0);
 }
 
-
 void mount_archive_recursive(const char* extension, const char* dir, const char* mountpoint) {
-// Recursive Archive Mounter
+    const char* zsdic_path = "data/ZsDic.pack.zs";
+    PHYSFS_mount(zsdic_path, mountpoint, false);
+
+    zstd_io_add_dict("/pack.zsdic");
+    zstd_io_add_dict("/bcett.byml.zsdic");
+    zstd_io_add_dict("/zs.zsdic");
+
+    // Recursive Archive Mounter
     char** file_list = PHYSFS_enumerateFiles(dir);
     char* base = PHYSFS_getBaseDir();
 

@@ -4,10 +4,11 @@ add_library(sarc_archiver STATIC
     vmem.c
     physfs_utils.c
     sarc_io.c
+    zstd_io.c
     logging.c
 )
 
-target_link_libraries(sarc_archiver PUBLIC physfs-static)
+target_link_libraries(sarc_archiver PUBLIC physfs-static zstd)
 target_include_directories(sarc_archiver PUBLIC "./")
 
 if (SARC_ARCHIVER_BUILD_TEST)

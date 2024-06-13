@@ -16,12 +16,14 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+#include <zstd.h>
 #include <physfs.h>
 #define __PHYSICSFS_INTERNAL__
 #include <physfs_internal.h>
 
 #include "sarc.h"
 #include "sarc_io.h"
+#include "zstd_io.h"
 #include "archiver_sarc.h"
 #include "archiver_sarc_internal.h"
 #include "vmem.h"
@@ -36,7 +38,7 @@ const PHYSFS_Archiver archiver_sarc_default = {
   .info = {
     // It'll work fine if we call the extension SARC, but slows everything down
     // because it just tries every possible archiver. (I lose a full second when mounting 15000 archives)
-    .extension = "pack",
+    .extension = "pack.zs",
     .description = "SARC for Zelda, Animal Crossing, Mario, Misc. Nintendo",
     .author = "Torphedo",
     .url = "https://github.com/Torphedo",
@@ -334,11 +336,19 @@ bool SARC_loadEntries(PHYSFS_Io* io, uint32_t count, uint32_t files_offset, SARC
 void* SARC_openArchive(PHYSFS_Io* io, const char* name, int forWriting, int* claimed) {
   assert(io != NULL); // Sanity check.
 
-  static const char magic[] = "SARC";
-  sarc_header header = { 0 };
+  sarc_header header = {0};
   bool headerMatches;
   io->read(io, &header, sizeof(header));
-  headerMatches = strncmp((char*)&header.magic, magic, 4) == 0;
+  headerMatches = (header.magic == SARC_MAGIC);
+  if (header.magic == ZSTD_MAGICNUMBER) {
+      // Reset, enable ZSTD support, and try again.
+      io->seek(io, 0);
+      // We don't overwrite data at the pointer, but this new pointer will be
+      // saved in the context (used to access the IO everywhere else)
+      io = zstd_wrap_io(io);
+      io->read(io, &header, sizeof(header));
+      headerMatches = (header.magic == SARC_MAGIC);
+  }
 
   if (!forWriting && !headerMatches)
       BAIL(PHYSFS_ERR_UNSUPPORTED, NULL);
@@ -362,9 +372,8 @@ void* SARC_openArchive(PHYSFS_Io* io, const char* name, int forWriting, int* cla
       // Claim the archive, because it's gonna be a valid SARC
       *claimed = 1;
 
-      static const char magic[] = "SARC";
       sarc_header header = { .header_size = 0x14, .byte_order_mark = 0xFEFF, .archive_size = 0x0, .data_offset = 0x48, .version = 0x100, .reserved = 0x00 };
-      memcpy(&header.magic, &magic, 4);
+      header.magic = SARC_MAGIC;
       io->write(io, &header, sizeof(header));
 
       static const char sfat_magic[] = "SFAT";

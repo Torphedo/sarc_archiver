@@ -1,3 +1,6 @@
 [submodule "ext/physfs"]
 	path = ext/physfs
 	url = https://github.com/nintenstudio/physfs
+[submodule "ext/zstd"]
+	path = ext/zstd
+	url = https://github.com/facebook/zstd

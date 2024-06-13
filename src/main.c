@@ -52,7 +52,7 @@ int main(int argc, char** argv) {
   }
 
   LOG_MSG(info, "Mounting all SARC archives...\n");
-  mount_archive_recursive(".pack", "data", "/");
+  mount_archive_recursive(".pack.zs", "data", "/");
   LOG_MSG(info, "Done.\n");
 
   char** file_list = PHYSFS_enumerateFiles("/");
