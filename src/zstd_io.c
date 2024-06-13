@@ -27,12 +27,14 @@ typedef struct {
     u8* dbuf;
 
     u8* in_buf;
+    size_t in_buf_idx;
     size_t in_pos;
 }zstd_ctx;
 
 enum {
     OUT_SIZE = ZSTD_BLOCKSIZE_MAX,
     IN_SIZE = ZSTD_BLOCKSIZE_MAX + ZSTD_BLOCKHEADERSIZE,
+    READLIMIT_DEFAULT = 10,
 };
 
 void zstd_io_add_dict(char* path) {
@@ -61,6 +63,7 @@ void zstd_io_add_dict(char* path) {
 }
 
 bool zstd_decompress_block(zstd_ctx* ctx) {
+    // If we need more data but our buffers were freed, we need to re-alloc
     if (ctx->dbuf == NULL) {
         LOG_MSG(debug, "Had to alloc temp buffer.\n");
         ctx->dbuf = allocator.Malloc(OUT_SIZE);
@@ -74,6 +77,10 @@ bool zstd_decompress_block(zstd_ctx* ctx) {
         if (ctx == NULL) {
             return 0;
         }
+        // We need to get back the input data we freed
+        for (u32 i = 0; i < ctx->in_buf_idx; i++) {
+            ctx->io->read(ctx->io, (void*)ctx->in_buf, IN_SIZE);
+        }
     }
 
     ctx->dbuf_idx++;
@@ -83,6 +90,7 @@ bool zstd_decompress_block(zstd_ctx* ctx) {
         bool input_remaining = (ctx->in_pos < IN_SIZE) && ctx->in_pos > 0;
         if (!input_remaining) {
             ctx->io->read(ctx->io, (void*)ctx->in_buf, IN_SIZE);
+            ctx->in_buf_idx++;
         }
 
         rc = ZSTD_decompressStream_simpleArgs(ctx->dstream, ctx->dbuf, OUT_SIZE, &ctx->dpos, ctx->in_buf, IN_SIZE, &ctx->in_pos);
@@ -106,11 +114,12 @@ bool zstd_decompress_block(zstd_ctx* ctx) {
 }
 
 bool zstd_ctx_init(zstd_ctx* ctx) {
-    ctx->read_count = 0;
-    ctx->read_limit = 3;
+    // After this many reads, our decompression buffers will be freed and have
+    // to be re-allocated next time they're needed.
+    ctx->read_limit = READLIMIT_DEFAULT;
+
+    // Setup compression & register dictionaries
     ctx->dstream = ZSTD_createDStream();
-    ctx->dpos = 0;
-    ctx->dbuf_idx = 0;
     ZSTD_initDStream(ctx->dstream);
     ZSTD_DCtx_setParameter(ctx->dstream, ZSTD_d_refMultipleDDicts, ZSTD_rmd_refMultipleDDicts);
     for (u32 i = 0; i < ARRAY_SIZE(dict_buffers); i++) {
@@ -124,10 +133,11 @@ bool zstd_ctx_init(zstd_ctx* ctx) {
         }
     }
 
-    ctx->in_pos = 0;
+    // Alloc our decompression buffers
     ctx->dbuf = allocator.Malloc(OUT_SIZE);
     ctx->in_buf = allocator.Malloc(IN_SIZE);
 
+    // Decompress the first chunk so we have data to work with already
     zstd_decompress_block(ctx);
     return true;
 }
@@ -172,7 +182,6 @@ PHYSFS_sint64 zstd_read(PHYSFS_Io *io, void *buffer, PHYSFS_uint64 len) {
 
     ctx->read_count++;
     if (ctx->read_count == ctx->read_limit) {
-        // LOG_MSG(debug, "Freed temp buffer.\n");
         allocator.Free(ctx->dbuf);
         allocator.Free(ctx->in_buf);
         ctx->dbuf = NULL;
@@ -237,8 +246,8 @@ PHYSFS_sint64 zstd_length(PHYSFS_Io *io) {
 void zstd_set_io_file_count(PHYSFS_Io* io, u32 count) {
     zstd_ctx* ctx = (zstd_ctx*)io->opaque;
     // This means it's *probably* a ZSTD context and not something random.
-    if (ctx->read_limit == 3 && ctx->io != NULL) {
-        ctx->read_limit += count;
+    if (ctx->read_limit == READLIMIT_DEFAULT && ctx->io != NULL) {
+        ctx->read_limit = 3 + count;
     }
 }
 
@@ -251,6 +260,7 @@ PHYSFS_Io* zstd_wrap_io(PHYSFS_Io* io) {
         return NULL;
     }
     *out = ZSTD_Io;
+    memset(new_ctx, 0x00, sizeof(*new_ctx));
 
     // Setup our context for streaming decompression, and to wrap the other IO
     new_ctx->io = io;
@@ -269,6 +279,7 @@ PHYSFS_Io *zstd_duplicate(PHYSFS_Io *io) {
         return NULL;
     }
     *out = ZSTD_Io;
+    memset(new_ctx, 0x00, sizeof(*new_ctx));
 
     new_ctx->io = old_ctx->io->duplicate(old_ctx->io);
 
