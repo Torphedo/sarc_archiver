@@ -31,7 +31,7 @@ typedef struct {
     ZSTD_inBuffer in_buf;
 }zstd_ctx;
 
-void zstd_io_add_dict(char* path) {
+void zstd_io_add_dict(const char* path) {
     for (u32 i = 0; i < ARRAY_SIZE(dict_buffers); i++) {
         // Skip elements that are already filled
         if (dict_buffers[i] != NULL) {
