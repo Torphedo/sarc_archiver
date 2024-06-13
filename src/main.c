@@ -56,6 +56,7 @@ int main(int argc, char** argv) {
   LOG_MSG(info, "Mounting all SARC archives...\n");
   mount_archive_recursive(".pack.zs", "data", "/");
   LOG_MSG(info, "Done.\n");
+  PHYSFS_unmount(PHYSFS_getBaseDir());
 
   char** file_list = PHYSFS_enumerateFiles("/");
   for (char** i = file_list; *i != NULL; i++) {
@@ -82,7 +83,7 @@ int main(int argc, char** argv) {
           PHYSFS_close(arc);
 
           // Write dir juggling
-          char* old_write_dir_temp = PHYSFS_getWriteDir();
+          const char* old_write_dir_temp = PHYSFS_getWriteDir();
           char* old_write_dir = allocator.Malloc(strlen(old_write_dir_temp) + 1);
           if (old_write_dir == NULL) {
               LOG_MSG(error, "Alloc failed for old write dir!\n");
