@@ -358,6 +358,7 @@ void* SARC_openArchive(PHYSFS_Io* io, const char* name, int forWriting, int* cla
 
       sarc_sfat_header sfat_header = { 0 };
       io->read(io, &sfat_header, sizeof(sfat_header));
+      zstd_set_io_file_count(io, sfat_header.node_count);
 
       SARC_ctx* archive = SARC_init_archive(io);
       BAIL_IF_ERRPASS(!archive, NULL);
