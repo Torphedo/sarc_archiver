@@ -148,7 +148,10 @@ bool path_has_extension(const char* path, const char* extension) {
 }
 
 void mount_archive_recursive(const char* extension, const char* dir, const char* mountpoint) {
-    const char* zsdic_path = "data/ZsDic.pack.zs";
+    const char* base = PHYSFS_getBaseDir();
+    char zsdic_path[512] = {0};
+    sprintf(zsdic_path, "%s%s%s%s", base, dir, PHYSFS_getDirSeparator(), "/ZsDic.pack.zs");
+
     PHYSFS_mount(zsdic_path, mountpoint, false);
 
     zstd_io_add_dict("/pack.zsdic");
@@ -157,7 +160,6 @@ void mount_archive_recursive(const char* extension, const char* dir, const char*
 
     // Recursive Archive Mounter
     char** file_list = PHYSFS_enumerateFiles(dir);
-    char* base = PHYSFS_getBaseDir();
 
     for (char** i = file_list; *i != NULL; i++) {
         if (*i == NULL) {
@@ -180,7 +182,8 @@ void mount_archive_recursive(const char* extension, const char* dir, const char*
             uint32_t err = PHYSFS_mount(full_path, mountpoint, true);
 
             if (err == 0) {
-                LOG_MSG(error, "Mount failed. Message: %s\n", PHYSFS_getLastError());
+                PHYSFS_ErrorCode e = PHYSFS_getLastErrorCode();
+                LOG_MSG(error, "Mount failed: %s\n", PHYSFS_getErrorByCode(e));
             }
         }
     }

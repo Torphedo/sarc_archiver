@@ -26,8 +26,6 @@ set(SARC_ARCHIVER_BUILD_TEST TRUE CACHE BOOL "" FORCE)
 
 include_directories("ext/zstd/lib")
 add_library(zstd STATIC
-	ext/zstd/doc/educational_decoder/harness.c
-	ext/zstd/doc/educational_decoder/zstd_decompress.c
 	ext/zstd/lib/compress/hist.c
 	ext/zstd/lib/compress/zstdmt_compress.c
 	ext/zstd/lib/compress/zstd_compress_literals.c
