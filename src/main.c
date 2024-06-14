@@ -1,11 +1,4 @@
-#ifdef PHYSFS_PLATFORM_UNIX
-
 #include <stdio.h>
-#include <stdint.h>
-#include <malloc.h>
-
-// Linux-only
-#include <sys/resource.h>
 
 #include <physfs.h>
 
@@ -14,7 +7,9 @@
 #include "physfs_utils.h"
 #include "logging.h"
 
-const char packname[] = "Armor_012_Upper.pack";
+#ifdef PHYSFS_PLATFORM_UNIX
+// Linux-only
+#include <sys/resource.h>
 
 bool increase_file_limit() {
     struct rlimit rlim;
@@ -31,7 +26,11 @@ bool increase_file_limit() {
     }
     return true;
 }
-
+#else
+bool increase_file_limit() {
+    return true;
+}
+#endif
 
 int main(int argc, char** argv) {
   enable_win_ansi();
@@ -41,7 +40,7 @@ int main(int argc, char** argv) {
 
   PHYSFS_init(argv[0]);
 
-  PHYSFS_mount(PHYSFS_getBaseDir(), NULL, true);
+  PHYSFS_ErrorCode err = PHYSFS_mount(PHYSFS_getBaseDir(), NULL, true);
   PHYSFS_permitDanglingWriteHandles(1);
   PHYSFS_setWriteDir(PHYSFS_getBaseDir());
 
@@ -56,7 +55,8 @@ int main(int argc, char** argv) {
   LOG_MSG(info, "Mounting all SARC archives...\n");
   mount_archive_recursive(".pack.zs", "data", "/");
   LOG_MSG(info, "Done.\n");
-  PHYSFS_unmount(PHYSFS_getBaseDir());
+  const char* base = PHYSFS_getBaseDir();
+  PHYSFS_unmount(base);
 
   char** file_list = PHYSFS_enumerateFiles("/");
   for (char** i = file_list; *i != NULL; i++) {
@@ -113,11 +113,3 @@ int main(int argc, char** argv) {
 
   return 0;
 }
-
-#else
-
-int main(int argc, char** argv) {
-    return 0;
-}
-
-#endif
