@@ -104,7 +104,10 @@ PHYSFS_Io *SARC_openRead(void *opaque, const char *name) {
   file = (SARC_file_ctx *) allocator.Malloc(sizeof (SARC_file_ctx));
   GOTO_IF(!file, PHYSFS_ERR_OUT_OF_MEMORY, SARC_openRead_failed);
 
-  file->io = info->io->duplicate(info->io);
+  if (info->is_zstd)
+      file->io = zstd_wrap_io(info->io->duplicate(info->io));
+  else
+      file->io = info->io->duplicate(info->io);
   GOTO_IF_ERRPASS(!file->io, SARC_openRead_failed);
 
   if (!file->io->seek(file->io, entry->startPos)) {
@@ -200,10 +203,15 @@ PHYSFS_Io* SARC_openWrite(void *opaque, const char *name) {
   else {
     file_info->curPos = 0;
     file_info->entry = findEntry(info, name);
-    if (!newFile)
-        file_info->io = info->io->duplicate(info->io);
-    else
+    if (!newFile) {
+        if (info->is_zstd)
+            file_info->io = zstd_wrap_io(info->io->duplicate(info->io));
+        else
+            file_info->io = info->io->duplicate(info->io);
+    }
+    else {
         file_info->io = __PHYSFS_createMemoryIo((void*)file_info->entry->data_ptr, 0, NULL);
+    }
     file_info->arc_info = opaque;
     file_info->open_for_write = 1;
   }
@@ -333,19 +341,22 @@ bool SARC_loadEntries(PHYSFS_Io* io, uint32_t count, uint32_t files_offset, SARC
   return true;
 }
 
-void* SARC_openArchive(PHYSFS_Io* io, const char* name, int forWriting, int* claimed) {
-  assert(io != NULL); // Sanity check.
+void* SARC_openArchive(PHYSFS_Io* _io, const char* name, int forWriting, int* claimed) {
+  assert(_io != NULL); // Sanity check.
 
+  PHYSFS_Io* io = _io;
   sarc_header header = {0};
-  bool headerMatches;
-  io->read(io, &header, sizeof(header));
+  int headerMatches;
+  int isZSTD = 0;
+  _io->read(io, &header, sizeof(header));
   headerMatches = (header.magic == SARC_MAGIC);
   if (header.magic == ZSTD_MAGICNUMBER) {
+      isZSTD = 1;
       // Reset, enable ZSTD support, and try again.
-      io->seek(io, 0);
+      _io->seek(io, 0);
       // We don't overwrite data at the pointer, but this new pointer will be
       // saved in the context (used to access the IO everywhere else)
-      io = zstd_wrap_io(io);
+      io = zstd_wrap_io(_io);
       io->read(io, &header, sizeof(header));
       headerMatches = (header.magic == SARC_MAGIC);
   }
@@ -358,16 +369,18 @@ void* SARC_openArchive(PHYSFS_Io* io, const char* name, int forWriting, int* cla
 
       sarc_sfat_header sfat_header = { 0 };
       io->read(io, &sfat_header, sizeof(sfat_header));
-      // Give the ZSTD IO a hint for when the archive is done mounting
-      zstd_set_io_file_count(io, sfat_header.node_count);
 
-      SARC_ctx* archive = SARC_init_archive(io);
+      SARC_ctx* archive = SARC_init_archive(_io);
       BAIL_IF_ERRPASS(!archive, NULL);
 
       archive->arc_filename = allocator.Malloc(strlen(name) + 1);
       strcpy(archive->arc_filename, name);
+      archive->is_zstd = isZSTD;
 
       SARC_loadEntries(io, sfat_header.node_count, header.data_offset, archive);
+
+      if (isZSTD)
+          io->destroy(io);
       return archive;
   }
   else {
@@ -383,13 +396,17 @@ void* SARC_openArchive(PHYSFS_Io* io, const char* name, int forWriting, int* cla
       memcpy(&sfat_header.magic, &sfat_magic, 4);
       io->write(io, &sfat_header, sizeof(sfat_header));
 
-      SARC_ctx* archive = SARC_init_archive(io);
+      SARC_ctx* archive = SARC_init_archive(_io);
       BAIL_IF_ERRPASS(!archive, NULL);
 
       archive->arc_filename = allocator.Malloc(strlen(name) + 1);
       strcpy(archive->arc_filename, name);
+      archive->is_zstd = isZSTD;
 
       SARC_loadEntries(io, sfat_header.node_count, header.data_offset, archive);
+
+      if (isZSTD)
+          io->destroy(io);
       return archive;
   }
 }

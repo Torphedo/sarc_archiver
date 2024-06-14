@@ -13,10 +13,6 @@ extern "C" {
 PHYSFS_Io* zstd_wrap_io(PHYSFS_Io* io);
 void zstd_io_add_dict(const char* path);
 
-// Telling the IO how many files you have gives it a good guess for when the
-// archive is fully loaded, allowing extra data to be freed.
-void zstd_set_io_file_count(PHYSFS_Io* io, u32 count);
-
 // Custom IO
 PHYSFS_sint64 zstd_read(PHYSFS_Io *io, void *buffer, PHYSFS_uint64 len);
 PHYSFS_sint64 zstd_write(PHYSFS_Io *io, const void *b, PHYSFS_uint64 len);
