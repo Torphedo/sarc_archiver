@@ -1,11 +1,12 @@
 #include <stdio.h>
+#include <time.h>
 
 #include <physfs.h>
-
 
 #include "archiver_sarc.h"
 #include "physfs_utils.h"
 #include "logging.h"
+#include "int.h"
 
 #ifdef PHYSFS_PLATFORM_UNIX
 // Linux-only
@@ -38,9 +39,10 @@ int main(int argc, char** argv) {
       return 1;
   }
 
+  clock_t start_clock = clock();
   PHYSFS_init(argv[0]);
 
-  PHYSFS_ErrorCode err = PHYSFS_mount(PHYSFS_getBaseDir(), NULL, true);
+  PHYSFS_mount(PHYSFS_getBaseDir(), NULL, true);
   PHYSFS_permitDanglingWriteHandles(1);
   PHYSFS_setWriteDir(PHYSFS_getBaseDir());
 
@@ -57,6 +59,10 @@ int main(int argc, char** argv) {
   LOG_MSG(info, "Done.\n");
   const char* base = PHYSFS_getBaseDir();
   PHYSFS_unmount(base);
+
+  clock_t end_clock = clock();
+  u64 elapsed_ms = (end_clock - start_clock) / (CLOCKS_PER_SEC / 1000);
+  LOG_MSG(debug, "Elapsed %lims\n", elapsed_ms);
 
   char** file_list = PHYSFS_enumerateFiles("/");
   for (char** i = file_list; *i != NULL; i++) {
