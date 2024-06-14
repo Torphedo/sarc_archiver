@@ -1,3 +1,5 @@
+#ifdef PHYSFS_PLATFORM_UNIX
+
 #include <stdio.h>
 #include <stdint.h>
 #include <malloc.h>
@@ -109,4 +111,13 @@ int main(int argc, char** argv) {
   LOG_MSG(info, "VFS shutdown\n");
   PHYSFS_deinit();
 
+  return 0;
 }
+
+#else
+
+int main(int argc, char** argv) {
+    return 0;
+}
+
+#endif

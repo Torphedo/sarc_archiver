@@ -19,6 +19,7 @@ typedef struct {
     PHYSFS_Io *io;
     uint32_t open_write_handles; // The number of write handles currently open to this archive
     char* arc_filename;
+    int is_zstd;
 }SARC_ctx;
 
 // Context for each IO stream (file inside a SARC)

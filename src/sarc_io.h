@@ -10,6 +10,7 @@ PHYSFS_sint64 SARC_write(PHYSFS_Io *io, const void *b, PHYSFS_uint64 len);
 PHYSFS_sint64 SARC_tell(PHYSFS_Io *io);
 int SARC_seek(PHYSFS_Io* io, PHYSFS_uint64 offset);
 PHYSFS_sint64 SARC_length(PHYSFS_Io* io);
+int SARC_trunc(PHYSFS_Io* io, PHYSFS_uint64 len);
 PHYSFS_Io *SARC_duplicate(PHYSFS_Io* _io);
 int SARC_flush(PHYSFS_Io* io);
 void SARC_destroy(PHYSFS_Io* io);
@@ -22,6 +23,7 @@ static const PHYSFS_Io SARC_Io = {
     .seek = SARC_seek,
     .tell = SARC_tell,
     .length = SARC_length,
+    .trunc = SARC_trunc,
     .duplicate = SARC_duplicate,
     .flush = SARC_flush,
     .destroy = SARC_destroy

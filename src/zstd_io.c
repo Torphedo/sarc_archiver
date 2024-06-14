@@ -12,9 +12,6 @@
 
 ZSTD_DDict* dict_buffers[3];
 typedef struct {
-    u32 read_limit;
-    u32 read_count;
-
     PHYSFS_Io* io;
     // Stream object for decompression
     ZSTD_DCtx* dstream;
@@ -37,7 +34,7 @@ enum {
     READLIMIT_DEFAULT = 10,
 };
 
-void zstd_io_add_dict(char* path) {
+void zstd_io_add_dict(const char* path) {
     for (u32 i = 0; i < ARRAY_SIZE(dict_buffers); i++) {
         // Skip elements that are already filled
         if (dict_buffers[i] != NULL) {
@@ -114,10 +111,6 @@ bool zstd_decompress_block(zstd_ctx* ctx) {
 }
 
 bool zstd_ctx_init(zstd_ctx* ctx) {
-    // After this many reads, our decompression buffers will be freed and have
-    // to be re-allocated next time they're needed.
-    ctx->read_limit = READLIMIT_DEFAULT;
-
     // Setup compression & register dictionaries
     ctx->dstream = ZSTD_createDStream();
     ZSTD_initDStream(ctx->dstream);
@@ -156,6 +149,7 @@ PHYSFS_sint64 zstd_read(PHYSFS_Io *io, void *buffer, PHYSFS_uint64 len) {
     u32 dest_pos = 0;
 
     // Keep reading until the entire length is read
+    PHYSFS_uint64 remainingLen = len;
     while (1) {
         if (ctx->dpos > OUT_SIZE) {
             LOG_MSG(warning, "Invalid dbuf position 0x%x\n", ctx->dpos);
@@ -163,15 +157,15 @@ PHYSFS_sint64 zstd_read(PHYSFS_Io *io, void *buffer, PHYSFS_uint64 len) {
         }
         // Copy the entire length, or whatever's left in the streaming buffer
         s32 remaining = OUT_SIZE - ctx->dpos;
-        u32 size = MIN(remaining, len);
+        u32 size = MIN(remaining, remainingLen);
         memcpy((u8*)buffer + dest_pos, (u8*)ctx->dbuf + ctx->dpos, size);
 
         // Update streaming buffer & other state
-        len -= size;
+        remainingLen -= size;
         ctx->dpos += size;
         dest_pos += size;
 
-        if (len == 0) {
+        if (remainingLen == 0) {
             // We had enough in the buffer to do the read, and can exit
             break;
         }
@@ -180,13 +174,6 @@ PHYSFS_sint64 zstd_read(PHYSFS_Io *io, void *buffer, PHYSFS_uint64 len) {
         zstd_decompress_block(ctx);
     }
 
-    ctx->read_count++;
-    if (ctx->read_count == ctx->read_limit) {
-        allocator.Free(ctx->dbuf);
-        allocator.Free(ctx->in_buf);
-        ctx->dbuf = NULL;
-        ctx->in_buf = NULL;
-    }
     return len;
 }
 
@@ -231,9 +218,9 @@ PHYSFS_sint64 zstd_tell(PHYSFS_Io *io) {
     return block_pos + ctx->dpos;
 }
 
-PHYSFS_sint64 zstd_length(PHYSFS_Io *io) {
+PHYSFS_sint64 zstd_length(PHYSFS_Io* io) {
     zstd_ctx* ctx = (zstd_ctx*)io->opaque;
-    ZSTD_DCtx_reset(ctx->dstream,  ZSTD_reset_session_only);
+    ZSTD_DCtx_reset(ctx->dstream, ZSTD_reset_session_only);
 
     u64 size = 0;
     while (zstd_decompress_block(ctx)) {
@@ -241,14 +228,6 @@ PHYSFS_sint64 zstd_length(PHYSFS_Io *io) {
     }
 
     return size;
-}
-
-void zstd_set_io_file_count(PHYSFS_Io* io, u32 count) {
-    zstd_ctx* ctx = (zstd_ctx*)io->opaque;
-    // This means it's *probably* a ZSTD context and not something random.
-    if (ctx->read_limit == READLIMIT_DEFAULT && ctx->io != NULL) {
-        ctx->read_limit = 3 + count;
-    }
 }
 
 PHYSFS_Io* zstd_wrap_io(PHYSFS_Io* io) {
