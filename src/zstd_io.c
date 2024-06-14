@@ -26,13 +26,9 @@ typedef struct {
     u8* in_buf;
     size_t in_buf_idx;
     size_t in_pos;
-}zstd_ctx;
 
-enum {
-    OUT_SIZE = ZSTD_BLOCKSIZE_MAX,
-    IN_SIZE = ZSTD_BLOCKSIZE_MAX + ZSTD_BLOCKHEADERSIZE,
-    READLIMIT_DEFAULT = 10,
-};
+    u32 max_block_size;
+}zstd_ctx;
 
 void zstd_io_add_dict(const char* path) {
     for (u32 i = 0; i < ARRAY_SIZE(dict_buffers); i++) {
@@ -63,20 +59,20 @@ bool zstd_decompress_block(zstd_ctx* ctx) {
     // If we need more data but our buffers were freed, we need to re-alloc
     if (ctx->dbuf == NULL) {
         LOG_MSG(debug, "Had to alloc temp buffer.\n");
-        ctx->dbuf = allocator.Malloc(OUT_SIZE);
+        ctx->dbuf = allocator.Malloc(ctx->max_block_size);
         if (ctx == NULL) {
             return 0;
         }
     }
     if (ctx->in_buf == NULL) {
         LOG_MSG(debug, "Had to alloc temp buffer.\n");
-        ctx->in_buf = allocator.Malloc(IN_SIZE);
+        ctx->in_buf = allocator.Malloc(ctx->max_block_size + ZSTD_BLOCKHEADERSIZE);
         if (ctx == NULL) {
             return 0;
         }
         // We need to get back the input data we freed
         for (u32 i = 0; i < ctx->in_buf_idx; i++) {
-            ctx->io->read(ctx->io, (void*)ctx->in_buf, IN_SIZE);
+            ctx->io->read(ctx->io, (void*)ctx->in_buf, ctx->max_block_size + ZSTD_BLOCKHEADERSIZE);
         }
     }
 
@@ -84,13 +80,12 @@ bool zstd_decompress_block(zstd_ctx* ctx) {
     ctx->dpos = 0;
     size_t rc = 1;
     while (rc != 0) {
-        bool input_remaining = (ctx->in_pos < IN_SIZE) && ctx->in_pos > 0;
+        bool input_remaining = (ctx->in_pos < ctx->max_block_size + ZSTD_BLOCKHEADERSIZE) && ctx->in_pos > 0;
         if (!input_remaining) {
-            ctx->io->read(ctx->io, (void*)ctx->in_buf, IN_SIZE);
+            ctx->io->read(ctx->io, (void*)ctx->in_buf, ctx->max_block_size + ZSTD_BLOCKHEADERSIZE);
             ctx->in_buf_idx++;
         }
-
-        rc = ZSTD_decompressStream_simpleArgs(ctx->dstream, ctx->dbuf, OUT_SIZE, &ctx->dpos, ctx->in_buf, IN_SIZE, &ctx->in_pos);
+        rc = ZSTD_decompressStream_simpleArgs(ctx->dstream, ctx->dbuf, ctx->max_block_size, &ctx->dpos, ctx->in_buf, ctx->max_block_size + ZSTD_BLOCKHEADERSIZE, &ctx->in_pos);
         if (ZSTD_isError(rc)) {
             ZSTD_ErrorCode err = ZSTD_getErrorCode(rc);
             if (err == ZSTD_error_noForwardProgress_destFull) {
@@ -101,7 +96,7 @@ bool zstd_decompress_block(zstd_ctx* ctx) {
             return false;
         }
 
-        bool output_flushed = (ctx->dpos < OUT_SIZE);
+        bool output_flushed = (ctx->dpos < ctx->max_block_size);
         if (output_flushed) {
             break;
         }
@@ -126,9 +121,24 @@ bool zstd_ctx_init(zstd_ctx* ctx) {
         }
     }
 
+    ZSTD_frameHeader frameHeader;
+    ctx->in_buf = allocator.Malloc(ZSTD_FRAMEHEADERSIZE_PREFIX(ZSTD_f_zstd1));
+    ctx->io->read(ctx->io, (void*)ctx->in_buf, ZSTD_FRAMEHEADERSIZE_PREFIX(ZSTD_f_zstd1));
+    ctx->io->seek(ctx->io, 0);
+    size_t frameHeaderSize = ZSTD_frameHeaderSize((void*)ctx->in_buf, ZSTD_FRAMEHEADERSIZE_PREFIX(ZSTD_f_zstd1));
+    allocator.Free(ctx->in_buf);
+    ctx->in_buf = allocator.Malloc(frameHeaderSize);
+    ctx->io->read(ctx->io, (void*)ctx->in_buf, frameHeaderSize);
+    ctx->io->seek(ctx->io, 0);
+    ZSTD_getFrameHeader(&frameHeader, (void*)ctx->in_buf, frameHeaderSize);
+    allocator.Free(ctx->in_buf);
+    ctx->max_block_size = frameHeader.blockSizeMax;
+
     // Alloc our decompression buffers
-    ctx->dbuf = allocator.Malloc(OUT_SIZE);
-    ctx->in_buf = allocator.Malloc(IN_SIZE);
+    ctx->dbuf = allocator.Malloc(ctx->max_block_size);
+    ctx->in_buf = allocator.Malloc(ctx->max_block_size + ZSTD_BLOCKHEADERSIZE);
+
+    
 
     // Decompress the first chunk so we have data to work with already
     zstd_decompress_block(ctx);
@@ -141,7 +151,7 @@ PHYSFS_sint64 zstd_read(PHYSFS_Io *io, void *buffer, PHYSFS_uint64 len) {
     zstd_ctx* ctx = (zstd_ctx*)io->opaque;
     if (ctx->dbuf == NULL) {
         LOG_MSG(debug, "Had to alloc temp buffer.\n");
-        ctx->dbuf = allocator.Malloc(OUT_SIZE);
+        ctx->dbuf = allocator.Malloc(ctx->max_block_size);
         if (ctx == NULL) {
             return 0;
         }
@@ -151,12 +161,12 @@ PHYSFS_sint64 zstd_read(PHYSFS_Io *io, void *buffer, PHYSFS_uint64 len) {
     // Keep reading until the entire length is read
     PHYSFS_uint64 remainingLen = len;
     while (1) {
-        if (ctx->dpos > OUT_SIZE) {
+        if (ctx->dpos > ctx->max_block_size) {
             LOG_MSG(warning, "Invalid dbuf position 0x%x\n", ctx->dpos);
             return 0;
         }
         // Copy the entire length, or whatever's left in the streaming buffer
-        s32 remaining = OUT_SIZE - ctx->dpos;
+        s32 remaining = ctx->max_block_size - ctx->dpos;
         u32 size = MIN(remaining, remainingLen);
         memcpy((u8*)buffer + dest_pos, (u8*)ctx->dbuf + ctx->dpos, size);
 
@@ -184,9 +194,9 @@ PHYSFS_sint64 zstd_write(PHYSFS_Io *io, const void* buf, PHYSFS_uint64 len){
 int zstd_seek(PHYSFS_Io *io, PHYSFS_uint64 offset) {
     zstd_ctx* ctx = (zstd_ctx*)io->opaque;
 
-    u64 block_pos = (ctx->dbuf_idx - 1) * OUT_SIZE;
+    u64 block_pos = (ctx->dbuf_idx - 1) * ctx->max_block_size;
     // If the destination is in range of our decompressed buffer, just use that
-    if (block_pos < offset && offset < block_pos + OUT_SIZE) {
+    if (block_pos < offset && offset < block_pos + ctx->max_block_size) {
         ctx->dpos = offset - block_pos;
         return 1;
     }
@@ -198,13 +208,13 @@ int zstd_seek(PHYSFS_Io *io, PHYSFS_uint64 offset) {
         ctx->io->seek(ctx->io, 0);
         ctx->dbuf_idx = 0;
         zstd_decompress_block(ctx);
-        block_pos = (ctx->dbuf_idx - 1) * OUT_SIZE;
+        block_pos = (ctx->dbuf_idx - 1) * ctx->max_block_size;
     }
 
     // Decompress blocks until the target offset is between the current decompressed block and the next
-    while (offset > block_pos && offset > block_pos + OUT_SIZE) {
+    while (offset > block_pos && offset > block_pos + ctx->max_block_size) {
         zstd_decompress_block(ctx);
-        block_pos = (ctx->dbuf_idx - 1) * OUT_SIZE;
+        block_pos = (ctx->dbuf_idx - 1) * ctx->max_block_size;
     }
     ctx->dpos = offset - block_pos;
 
@@ -214,7 +224,7 @@ int zstd_seek(PHYSFS_Io *io, PHYSFS_uint64 offset) {
 PHYSFS_sint64 zstd_tell(PHYSFS_Io *io) {
     zstd_ctx* ctx = (zstd_ctx*)io->opaque;
     // We subtract one because the idx is incremented on every decompression (including the first)
-    u64 block_pos = (ctx->dbuf_idx - 1) * OUT_SIZE;
+    u64 block_pos = (ctx->dbuf_idx - 1) * ctx->max_block_size;
     return block_pos + ctx->dpos;
 }
 
@@ -224,7 +234,7 @@ PHYSFS_sint64 zstd_length(PHYSFS_Io* io) {
 
     u64 size = 0;
     while (zstd_decompress_block(ctx)) {
-        size += OUT_SIZE;
+        size += ctx->max_block_size;
     }
 
     return size;
